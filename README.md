@@ -5,9 +5,11 @@ This project converts 3D STL mesh files into depth map images and SVGs suitable 
 ## Features
 - Converts STL files to depth map PNGs
 - Embeds PNGs into SVGs with real-world dimensions (mm)
+- Replaces any full-depth islands and the perimeter with SVG curves
 - Optionally outputs only PNG or only SVG
-- Supports cropping and layering of islands in the depth map
-- Allows custom start height and total height for depth normalization
+- The SVG output has cropping and layering of islands in the depth map to create unique regions instead of a global image
+- Allows custom start height and total height for depth normalization and/or partial cuts
+- Auto orients the mesh so the largest surface area is "down" away from the camera. On most models this puts the side to be engraved (which has a smaller surface area because of any recesses) up toward the camera.
 
 ## Requirements
 - Python 3.8+
@@ -49,5 +51,10 @@ python stl_to_depthmap.py foam.stl --start-height 2 --total-height 10 --only-svg
 - `<input>.png`: The depth map as a PNG image.
 - `<input>.svg`: The SVG with embedded PNG layers and vector contours, sized in mm to match the mesh.
 
+## Notes
+ - Throws a lot of warnings, but no functional impact.
+   - throws a segfault when completing
+   - the camera perspective may throw a warning.
+
 ## License
-MIT
+GPL v2
