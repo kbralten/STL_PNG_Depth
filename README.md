@@ -25,9 +25,11 @@ pip install open3d numpy Pillow opencv-python
 
 ## Usage
 
+
 ```bash
-python stl_to_depthmap.py <input.stl> [--start-height HEIGHT] [--total-height HEIGHT] [--only-png] [--only-svg]
+python stl_to_depthmap.py <input.stl> [--start-height HEIGHT] [--total-height HEIGHT] [--only-png] [--only-svg] [--svg-contours]
 ```
+
 
 ### Arguments
 - `<input.stl>`: Path to the STL file to convert.
@@ -35,6 +37,8 @@ python stl_to_depthmap.py <input.stl> [--start-height HEIGHT] [--total-height HE
 - `--total-height HEIGHT`: (Optional) Total height for depth normalization in mm (default: 0.0, uses mesh height).
 - `--only-png`: Only write the PNG file, not the SVG.
 - `--only-svg`: Only write the SVG file, not the PNG.
+- `--svg-contours`: Write a separate SVG file (`<input>-contours.svg`) containing only the vector contours for each island and the overall outline.
+
 
 ### Example
 Convert an STL to both PNG and SVG:
@@ -45,6 +49,11 @@ python stl_to_depthmap.py foam.stl
 Convert with a custom height range and only output SVG:
 ```bash
 python stl_to_depthmap.py foam.stl --start-height 2 --total-height 10 --only-svg
+```
+
+Generate a separate SVG with only contours:
+```bash
+python stl_to_depthmap.py foam.stl --svg-contours
 ```
 
 ## Output

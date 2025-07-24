@@ -12,6 +12,56 @@ import base64
 import cv2
 
 def stl_to_depthmap(stl_path, start_height=0.0,total_height=0.0):
+    def write_svg_contours(depth_img, mesh_dims, min_bound, stl_path, overall_contours):
+        mask = ((depth_img > 1) & (depth_img < 254)).astype(np.uint8)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        svg_width = mesh_dims[0]
+        svg_height = mesh_dims[1]
+        min_x = min_bound[0]
+        min_y = min_bound[1]
+        contour_paths = []
+        # Add only the largest overall outline contour
+        if overall_contours:
+            contour_areas = [cv2.contourArea(c) for c in overall_contours]
+            if contour_areas:
+                max_idx = np.argmax(contour_areas)
+                largest_contour = overall_contours[max_idx]
+                points = []
+                for pt in largest_contour.squeeze():
+                    x_px, y_px = pt
+                    x_model = x_px / depth_img.shape[1] * svg_width + min_x
+                    y_model = y_px / depth_img.shape[0] * svg_height + min_y
+                    points.append(f"{x_model},{y_model}")
+                if points:
+                    path_str = "M " + " L ".join(points) + " Z"
+                    contour_paths.append(f'<path d="{path_str}" stroke="rgb(255,219,102)" fill="none" stroke-width="1.0" />')
+        # Add island contours
+        for label in range(1, num_labels):
+            island_mask = (labels == label).astype(np.uint8) * 255
+            contours, _ = cv2.findContours(island_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                if len(contour) < 2:
+                    continue
+                points = []
+                for pt in contour.squeeze():
+                    x_px, y_px = pt
+                    x_model = x_px / depth_img.shape[1] * svg_width + min_x
+                    y_model = y_px / depth_img.shape[0] * svg_height + min_y
+                    points.append(f"{x_model},{y_model}")
+                if points:
+                    path_str = "M " + " L ".join(points) + " Z"
+                    contour_paths.append(f'<path d="{path_str}" stroke="rgb(255,219,102)" fill="none" stroke-width="0.1" />')
+        # Write contours SVG file
+        contours_svg_path = os.path.splitext(stl_path)[0] + "-contours.svg"
+        contours_svg = f'''<?xml version="1.0" encoding="UTF-8"?>
+        <svg xmlns="http://www.w3.org/2000/svg" width="{svg_width}mm" height="{svg_height}mm" viewBox="0 0 {svg_width} {svg_height}">
+            {''.join(contour_paths)}
+        </svg>
+        '''
+        with open(contours_svg_path, "w") as f:
+            f.write(contours_svg)
+        print(f"Contours SVG saved to {contours_svg_path}")
+    
     # Load STL mesh
     mesh = o3d.io.read_triangle_mesh(stl_path)
     mesh.compute_vertex_normals()
@@ -47,7 +97,7 @@ def stl_to_depthmap(stl_path, start_height=0.0,total_height=0.0):
     mesh.translate(translation)
 
     # Use Open3D OffscreenRenderer for depth rendering
-    import open3d.visualization.rendering as rendering
+    import open3d.visualization.rendering as rendering # type: ignore
     bounds = mesh.get_axis_aligned_bounding_box()
     center = mesh.get_center()
     min_bound = bounds.get_min_bound()
@@ -67,7 +117,7 @@ def stl_to_depthmap(stl_path, start_height=0.0,total_height=0.0):
 
     renderer = rendering.OffscreenRenderer(width, height)
     near = min_bound[2] - mesh_height
-    far = max_bound[2] + mesh_height+mesh_height * 20.0
+    far = max_bound[2] + mesh_height
     mat = rendering.MaterialRecord()
     renderer.scene.add_geometry("mesh", mesh, mat)
 
@@ -80,9 +130,6 @@ def stl_to_depthmap(stl_path, start_height=0.0,total_height=0.0):
     
     print (f"Center: {center}")
     
-    eye = center + np.array([0, 0, mesh_height * 20.0])
-    up = np.array([0, 1, 0])
-    renderer.setup_camera(0, center, eye, up)
     renderer.scene.camera.set_projection(
         rendering.Camera.Projection.Ortho,
         min_bound[0], max_bound[0], min_bound[1], max_bound[1],
@@ -182,7 +229,7 @@ def stl_to_depthmap(stl_path, start_height=0.0,total_height=0.0):
         rgba = np.concatenate([rgb, alpha[..., None]], axis=-1)
         # Set black/white pixels to transparent as well
         rgba[(cropped_depth<=1)|(cropped_depth>=254), 3] = 0
-        img = Image.fromarray(rgba, mode="RGBA")
+        img = Image.fromarray(rgba)
         buf = BytesIO()
         img.save(buf, format="PNG")
         png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
@@ -206,6 +253,11 @@ def stl_to_depthmap(stl_path, start_height=0.0,total_height=0.0):
             f.write(svg_template)
         print(f"SVG saved to {svg_path}")
 
+    # Write SVG contours if requested
+    if getattr(stl_to_depthmap, 'write_svg_contours', False):
+        write_svg_contours(depth_img, mesh_dims, min_bound, stl_path, contours)
+        print("Contours SVG written with only island outlines.")
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Convert STL to depthmap SVG")
@@ -214,11 +266,14 @@ if __name__ == "__main__":
     parser.add_argument("--total-height", type=float, default=0.0, help="Total height for depth normalization (mm)")
     parser.add_argument("--only-png", action="store_true", help="Only write PNG, not SVG")
     parser.add_argument("--only-svg", action="store_true", help="Only write SVG, not PNG")
+    parser.add_argument("--svg-contours", action="store_true", help="Write SVG file with only contours for each island")
     args = parser.parse_args()
 
     # Feature switches
     stl_to_depthmap.write_png = not args.only_svg
     stl_to_depthmap.write_svg = not args.only_png
+    stl_to_depthmap.write_svg_contours = args.svg_contours
 
+    # Run main conversion
     stl_to_depthmap(args.stl_path, start_height=args.start_height, total_height=args.total_height)
 
