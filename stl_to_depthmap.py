@@ -113,7 +113,7 @@ def stl_to_depthmap(stl_path, start_height=0.0,total_height=0.0):
         print(f"Total height scaling: max value: {np.max(scaled_depth_img)}, min value: {np.min(scaled_depth_img)}")
 
     #update depth_img to scaled_depth_img where the original depth is not zero or not 255
-    depth_img = np.where((depth_img != 0) & (depth_img != 255), scaled_depth_img, depth_img)    
+    depth_img = np.where((depth_img >1) & (depth_img <254), scaled_depth_img, depth_img)    
 
     # Encode PNG for SVG embedding
     png_buffer = BytesIO()
@@ -161,7 +161,7 @@ def stl_to_depthmap(stl_path, start_height=0.0,total_height=0.0):
             path_elems.append(f'<path d="{path_str}" stroke="rgb(255,219,102)" fill="none" stroke-width="0.5" />')
 
     # Find islands of non-transparent pixels (connected components)
-    mask = ((depth_img != 0) & (depth_img != 255)).astype(np.uint8)
+    mask = ((depth_img > 1) & (depth_img < 254)).astype(np.uint8)
     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
 
     png_layers = []
@@ -181,7 +181,7 @@ def stl_to_depthmap(stl_path, start_height=0.0,total_height=0.0):
         rgb = np.stack([cropped_depth]*3, axis=-1)
         rgba = np.concatenate([rgb, alpha[..., None]], axis=-1)
         # Set black/white pixels to transparent as well
-        rgba[(cropped_depth==0)|(cropped_depth==255), 3] = 0
+        rgba[(cropped_depth<=1)|(cropped_depth>=254), 3] = 0
         img = Image.fromarray(rgba, mode="RGBA")
         buf = BytesIO()
         img.save(buf, format="PNG")
