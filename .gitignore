@@ -1,0 +1,7 @@
+#sample files
+foam.png
+foam.stl
+foam.svg
+
+#ignore the environment directory
+/pb/
