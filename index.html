@@ -618,13 +618,31 @@
                 alert("No model loaded.");
                 return;
             }
+            
+            const orientation = viewSelector.value;
 
             // Determine high-res size (long side = 4000px)
-            let box = currentModel.geometry.boundingBox;
-            let size = new THREE.Vector3();
+            const box = currentModel.geometry.boundingBox;
+            const size = new THREE.Vector3();
             box.getSize(size);
-            let aspect = size.x / size.y;
-            let longSide = 4000;
+
+            let frustumWidth = 0;
+            let frustumHeight = 0;
+
+            if (orientation === 'Top' || orientation === 'Bottom') {
+                frustumWidth = size.x;
+                frustumHeight = size.z;
+            } else if (orientation === 'Left' || orientation === 'Right') {
+                frustumWidth = size.y;
+                frustumHeight = size.z;
+            } else if (orientation === 'Front' || orientation === 'Back') {
+                frustumWidth = size.x;
+                frustumHeight = size.y;
+            }
+
+            const aspect = frustumWidth / frustumHeight;
+
+            const longSide = 4000;
             let highResWidth, highResHeight;
             if (aspect >= 1) {
                 highResWidth = longSide;
@@ -649,21 +667,26 @@
 
             // Clone the depth camera and adjust for high-res aspect/frustum
             const highResCamera = depthCamera.clone();
+            
             // Adjust frustum for new aspect ratio
-            let frustumWidth = Math.abs(depthCamera.right - depthCamera.left);
-            let frustumHeight = Math.abs(depthCamera.top - depthCamera.bottom);
             let camAspect = highResWidth / highResHeight;
+            let finalFrustumWidth, finalFrustumHeight;
+
             if (frustumWidth / frustumHeight > camAspect) {
-                frustumHeight = frustumWidth / camAspect;
+                finalFrustumWidth = frustumWidth;
+                finalFrustumHeight = frustumWidth / camAspect;
             } else {
-                frustumWidth = frustumHeight * camAspect;
+                finalFrustumHeight = frustumHeight;
+                finalFrustumWidth = frustumHeight * camAspect;
             }
-            const centerX = (depthCamera.left + depthCamera.right) / 2;
-            const centerY = (depthCamera.top + depthCamera.bottom) / 2;
-            highResCamera.left = centerX - frustumWidth / 2;
-            highResCamera.right = centerX + frustumWidth / 2;
-            highResCamera.top = centerY + frustumHeight / 2;
-            highResCamera.bottom = centerY - frustumHeight / 2;
+            
+            const centerX = (highResCamera.left + highResCamera.right) / 2;
+            const centerY = (highResCamera.top + highResCamera.bottom) / 2;
+            highResCamera.left = centerX - finalFrustumWidth / 2;
+            highResCamera.right = centerX + finalFrustumWidth / 2;
+            highResCamera.top = centerY + finalFrustumHeight / 2;
+            highResCamera.bottom = centerY - finalFrustumHeight / 2;
+
             highResCamera.updateProjectionMatrix();
 
             // Render to high-res target
