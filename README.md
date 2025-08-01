@@ -72,9 +72,9 @@ Generate a separate SVG with only contours:
 python stl_to_depthmap.py foam.stl --svg-contours
 ```
 
-### Output
+## Output
 - `<input>.png`: The depth map as a PNG image.
-- `<input>.svg`: The SVG with embedded PNG layers and vector contours, sized in mm to match the mesh.
+- `<input>.svg`: The SVG with embedded PNG layers and vector contours, sized in mm to match the mesh.  
 
 ## Web Version
 
