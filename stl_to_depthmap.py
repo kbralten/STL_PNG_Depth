@@ -19,14 +19,31 @@ from multiprocessing import Pool, cpu_count
 import multiprocessing as mp
 
 def rasterize_triangle_batch(args):
-    """Rasterize a batch of triangles in parallel"""
-    triangle_batch, vertices, mesh_dims, min_bound, ss_width, ss_height, batch_idx = args
+    """Unified triangle rasterization with optional slice filtering"""
+    # Handle both old format (7 args) and new format (10 args) for backward compatibility
+    if len(args) == 7:
+        triangle_batch, vertices, mesh_dims, min_bound, ss_width, ss_height, batch_idx = args
+        slice_params = None
+    else:
+        triangle_batch, vertices, mesh_dims, min_bound, ss_width, ss_height, slice_start, slice_end, mesh_height, batch_idx = args
+        slice_params = (slice_start, slice_end)
     
     # Initialize depth buffer for this batch
     depth_buffer = np.full((ss_height, ss_width), -np.inf, dtype=np.float32)
     
-    for local_idx, triangle in enumerate(triangle_batch):
+    for triangle in triangle_batch:
         v0, v1, v2 = vertices[triangle]
+        
+        # Apply slice filtering if slice parameters are provided
+        if slice_params is not None:
+            slice_start, slice_end = slice_params
+            # Check if triangle intersects with slice range or is above it
+            tri_min_z = min(v0[2], v1[2], v2[2])
+            tri_max_z = max(v0[2], v1[2], v2[2])
+            
+            # Skip only triangles that are completely below the slice start
+            if tri_max_z < slice_start:
+                continue  # Triangle completely below slice - transparent
         
         # Convert to screen coordinates (supersampled)
         x0 = (v0[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
@@ -61,10 +78,19 @@ def rasterize_triangle_batch(args):
                 tolerance = -1e-6
                 if w0 >= tolerance and w1 >= tolerance and w2 >= tolerance:
                     # Interpolate depth
-                    depth = w0 * v0[2] + w1 * v1[2] + w2 * v2[2]
+                    interpolated_z = w0 * v0[2] + w1 * v1[2] + w2 * v2[2]
+                    
+                    # Apply slice filtering if slice parameters are provided
+                    if slice_params is not None:
+                        slice_start, slice_end = slice_params
+                        # For slicing, filter out surfaces that are below the slice
+                        # (these should be transparent as they're nearer than slice start)
+                        if interpolated_z < slice_start:
+                            continue  # Skip - will be transparent (nearer than slice)
+                    
                     # Update depth buffer (z-buffer test)
-                    if depth > depth_buffer[py, px]:
-                        depth_buffer[py, px] = depth
+                    if interpolated_z > depth_buffer[py, px]:
+                        depth_buffer[py, px] = interpolated_z
     
     return depth_buffer, batch_idx
 
@@ -120,7 +146,8 @@ def stl_to_depthmap(stl_path):
         '''
         with open(contours_svg_path, "w") as f:
             f.write(contours_svg)
-        print(f"Contours SVG saved to {contours_svg_path}")
+        if getattr(stl_to_depthmap, 'verbose', False):
+            print(f"Contours SVG saved to {contours_svg_path}")
     
     # Load STL mesh
     mesh = o3d.io.read_triangle_mesh(stl_path)
@@ -376,7 +403,8 @@ def stl_to_depthmap(stl_path):
         svg_path = os.path.splitext(stl_path)[0] + ".svg"
         with open(svg_path, "w") as f:
             f.write(svg_template)
-        print(f"SVG saved to {svg_path}")
+        if getattr(stl_to_depthmap, 'verbose', False):
+            print(f"SVG saved to {svg_path}")
 
     # Write SVG contours if requested
     if getattr(stl_to_depthmap, 'write_svg_contours', False):
@@ -502,7 +530,8 @@ def stl_to_depthmap_sliced(stl_path, slice_height):
         # Use the full depth image (not sliced) for PNG output
         img_obj = Image.fromarray(full_depth_img)
         img_obj.save(png_path, format="PNG")
-        print(f"PNG saved to {png_path}")
+        if getattr(stl_to_depthmap, 'verbose', False):
+            print(f"PNG saved to {png_path}")
 
 def generate_depth_image(mesh):
     """Generate depth image and return mesh info for slicing"""
@@ -630,66 +659,6 @@ def generate_depth_image(mesh):
     
     return depth_img, contours, mesh_info
 
-def rasterize_slice_triangle_batch(args):
-    """Rasterize a batch of triangles for a slice in parallel"""
-    triangle_batch, vertices, mesh_dims, min_bound, ss_width, ss_height, slice_start, slice_end, mesh_height, batch_idx = args
-    
-    depth_buffer = np.full((ss_height, ss_width), -np.inf, dtype=np.float32)
-    
-    for triangle in triangle_batch:
-        v0, v1, v2 = vertices[triangle]
-        
-        # Check if triangle intersects with slice range or is above it
-        tri_min_z = min(v0[2], v1[2], v2[2])
-        tri_max_z = max(v0[2], v1[2], v2[2])
-        
-        # Skip only triangles that are completely below the slice start
-        if tri_max_z < slice_start:
-            continue  # Triangle completely below slice - transparent
-        
-        # Convert to screen coordinates
-        x0 = (v0[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
-        y0 = (v0[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
-        x1 = (v1[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
-        y1 = (v1[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
-        x2 = (v2[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
-        y2 = (v2[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
-        
-        min_x = max(0, int(np.floor(min(x0, x1, x2))))
-        max_x = min(ss_width-1, int(np.ceil(max(x0, x1, x2))))
-        min_y = max(0, int(np.floor(min(y0, y1, y2))))
-        max_y = min(ss_height-1, int(np.ceil(max(y0, y1, y2))))
-        
-        if min_x > max_x or min_y > max_y:
-            continue
-        
-        for py in range(min_y, max_y + 1):
-            for px in range(min_x, max_x + 1):
-                denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
-                if abs(denom) < 1e-10:
-                    continue
-                
-                w0 = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) / denom
-                w1 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) / denom
-                w2 = 1 - w0 - w1
-                
-                tolerance = -1e-6
-                if w0 >= tolerance and w1 >= tolerance and w2 >= tolerance:
-                    interpolated_z = w0 * v0[2] + w1 * v1[2] + w2 * v2[2]
-                    
-                    # For slicing, filter out surfaces that are below the slice
-                    # (these should be transparent as they're nearer than slice start)
-                    if interpolated_z < slice_start:
-                        continue  # Skip - will be transparent (nearer than slice)
-                    
-                    # Store the actual Z coordinate for surfaces at or above slice start
-                    final_depth = interpolated_z
-                    
-                    if final_depth > depth_buffer[py, px]:
-                        depth_buffer[py, px] = final_depth
-    
-    return depth_buffer, batch_idx
-
 def generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_info):
     """Generate depth image for a specific slice using parallel processing"""
     from scipy import ndimage
@@ -723,9 +692,9 @@ def generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_i
     # Process batches in parallel
     if len(triangle_batches) > 1 and num_cores > 1:
         with Pool(processes=num_cores) as pool:
-            results = pool.map(rasterize_slice_triangle_batch, triangle_batches)
+            results = pool.map(rasterize_triangle_batch, triangle_batches)
     else:
-        results = [rasterize_slice_triangle_batch(batch) for batch in triangle_batches]
+        results = [rasterize_triangle_batch(batch) for batch in triangle_batches]
     
     # Combine results
     depth_buffer = np.full((ss_height, ss_width), -np.inf, dtype=np.float32)
@@ -918,7 +887,8 @@ def generate_sliced_svg(slice_data, contours, mesh_info, base_filename, mesh_hei
     svg_path = base_filename + ".svg"
     with open(svg_path, "w") as f:
         f.write(svg_template)
-    print(f"SVG saved to {svg_path}")
+    if getattr(stl_to_depthmap, 'verbose', False):
+        print(f"SVG saved to {svg_path}")
 
 if __name__ == "__main__":
     import argparse
@@ -956,5 +926,6 @@ if __name__ == "__main__":
     finally:
         # Force cleanup to prevent segmentation fault
         gc.collect()
-        print("Conversion completed successfully.")
+        if args.verbose:
+            print("Conversion completed successfully.")
 
