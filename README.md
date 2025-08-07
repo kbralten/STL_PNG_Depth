@@ -9,17 +9,18 @@ This project converts 3D STL mesh files into depth map images and SVGs suitable 
 
 ### Python Program
 - Converts STL files to depth map PNGs
-- Embeds PNGs into SVGs with real-world dimensions (mm)
-- Replaces any full-depth islands and the perimeter with SVG curves
-- Optionally outputs only PNG or only SVG
-- The SVG output has cropping and layering of islands in the depth map to create unique regions instead of a global image
-- Allows custom start height and total height for depth normalization and/or partial cuts
-- Auto orients the mesh so the largest surface area is "down" away from the camera. On most models this puts the side to be engraved (which has a smaller surface area because of any recesses) up toward the camera.
+- *Embeds PNGs into SVGs* with *real-world dimensions (mm)*
+- Replaces any full-depth *islands and the perimeter with SVG curves*
+- Optionally outputs *only PNG or only SVG*
+- **Supports slicing**: Allows splitting the depth map into multiple layers for fabrication workflows
+- **Optional segmentation**: Segmentation of islands and contours can be toggled to either create single images (per layer) or segment into islands (per layer).
+  - The SVG output has cropping and layering of islands in the depth map to create unique regions instead of a global image
+- *Auto orients the mesh* so the largest surface area is "down" away from the camera. On most models this puts the side to be engraved (which has a smaller surface area because of any recesses) up toward the camera.
 
 ### Web Version
-- Converts STL files to grayscale PNG depth maps directly in your browser
+- Converts *STL files to grayscale PNG depth maps* directly in your browser
 - No installation or Python required
-- Supports interactive 3D preview and depth map download
+- Supports *interactive 3D preview* and depth map download
 - No SVG/vector output (PNG only)
 
 ## Requirements
@@ -36,25 +37,22 @@ Install dependencies with:
 pip install open3d numpy Pillow opencv-python
 ```
 
-### Web Version
-- Modern web browser (Chrome, Firefox, Edge, etc.)
-- No installation needed
-
 ## Usage
 
 ### Python Program
 
 ```bash
-python stl_to_depthmap.py <input.stl> [--start-height HEIGHT] [--total-height HEIGHT] [--only-png] [--only-svg] [--svg-contours]
+python stl_to_depthmap.py <input.stl> [--slice-height HEIGHT] [--only-png] [--only-svg] [--svg-contours] [--segment] [--verbose]
 ```
 
 #### Arguments
 - `<input.stl>`: Path to the STL file to convert.
-- `--start-height HEIGHT`: (Optional) Start height offset in mm (default: 0.0).
-- `--total-height HEIGHT`: (Optional) Total height for depth normalization in mm (default: 0.0, uses mesh height).
+- `--slice-height HEIGHT`: (Optional) Height of each slice in mm (enables slicing mode).
 - `--only-png`: Only write the PNG file, not the SVG.
 - `--only-svg`: Only write the SVG file, not the PNG.
 - `--svg-contours`: Write a separate SVG file (`<input>-contours.svg`) containing only the vector contours for each island and the overall outline.
+- `--segment`: Enable segmentation of islands and contours.
+- `--verbose`: Enable verbose output for debugging.
 
 #### Example
 Convert an STL to both PNG and SVG:
@@ -62,14 +60,14 @@ Convert an STL to both PNG and SVG:
 python stl_to_depthmap.py foam.stl
 ```
 
-Convert with a custom height range and only output SVG:
+Convert with slicing into 5 mm layers and only output SVG:
 ```bash
-python stl_to_depthmap.py foam.stl --start-height 2 --total-height 10 --only-svg
+python stl_to_depthmap.py foam.stl --slice-height 5 --only-svg
 ```
 
-Generate a separate SVG with only contours:
+Generate a separate SVG with only contours and enable segmentation:
 ```bash
-python stl_to_depthmap.py foam.stl --svg-contours
+python stl_to_depthmap.py foam.stl --svg-contours --segment
 ```
 
 ## Output
@@ -79,11 +77,6 @@ python stl_to_depthmap.py foam.stl --svg-contours
 ## Web Version
 
 Open `stl_to_depthmap.html` in your browser. Upload an STL file, select the desired view, and download the PNG depth map.
-
-## Python Notes
- - Throws a lot of warnings, but no functional impact.
-   - throws a segfault when completing
-   - the camera perspective may throw a warning.
 
 ## License
 GPL v2
