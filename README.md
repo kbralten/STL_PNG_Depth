@@ -12,7 +12,7 @@ This project converts 3D STL mesh files into depth map images and SVGs suitable 
 - *Embeds PNGs into SVGs* with *real-world dimensions (mm)*
 - Replaces any full-depth *islands and the perimeter with SVG curves*
 - Optionally outputs *only PNG or only SVG*
-- **Supports slicing**: Allows splitting the depth map into multiple layers for fabrication workflows
+- **Supports slicing**: Allows splitting the depth map into multiple layers for fabrication workflows. See below for details on slicing height behavior.
 - **Optional segmentation**: Segmentation of islands and contours can be toggled to either create single images (per layer) or segment into islands (per layer).
   - The SVG output has cropping and layering of islands in the depth map to create unique regions instead of a global image
 - *Auto orients the mesh* so the largest surface area is "down" away from the camera. On most models this puts the side to be engraved (which has a smaller surface area because of any recesses) up toward the camera.
@@ -39,6 +39,7 @@ pip install open3d numpy Pillow opencv-python
 
 ## Usage
 
+
 ### Python Program
 
 ```bash
@@ -48,11 +49,15 @@ python stl_to_depthmap.py <input.stl> [--slice-height HEIGHT] [--only-png] [--on
 #### Arguments
 - `<input.stl>`: Path to the STL file to convert.
 - `--slice-height HEIGHT`: (Optional) Height of each slice in mm (enables slicing mode).
+  - **Slicing explainer:** If the model height is not a multiple of the slice height, the bottom slice will be the smaller remainder, and all higher slices will be full height. For example, a 40mm model with `--slice-height 15` will produce:
+    - Slice 1: 0–10mm (bottom, remainder)
+    - Slice 2: 10–25mm
+    - Slice 3: 25–40mm (top)
 - `--only-png`: Only write the PNG file, not the SVG.
 - `--only-svg`: Only write the SVG file, not the PNG.
 - `--svg-contours`: Write a separate SVG file (`<input>-contours.svg`) containing only the vector contours for each island and the overall outline.
 - `--segment`: Enable segmentation of islands and contours.
-- `--verbose`: Enable verbose output for debugging.
+- `--verbose`: Print detailed progress and debug output during processing.
 
 #### Example
 Convert an STL to both PNG and SVG:

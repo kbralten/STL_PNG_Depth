@@ -18,6 +18,8 @@ from scipy.ndimage import gaussian_filter
 from multiprocessing import Pool, cpu_count
 import multiprocessing as mp
 
+IMAGE_SIZE = 1000
+
 def rasterize_triangle_batch(args):
     """Unified triangle rasterization with optional slice filtering"""
     # Handle both old format (7 args) and new format (10 args) for backward compatibility
@@ -46,12 +48,13 @@ def rasterize_triangle_batch(args):
                 continue  # Triangle completely below slice - transparent
         
         # Convert to screen coordinates (supersampled)
+        # Note: Flip Y coordinate to correct for image coordinate system (Y=0 at top)
         x0 = (v0[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
-        y0 = (v0[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
+        y0 = (ss_height - 1) - (v0[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
         x1 = (v1[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
-        y1 = (v1[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
+        y1 = (ss_height - 1) - (v1[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
         x2 = (v2[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
-        y2 = (v2[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
+        y2 = (ss_height - 1) - (v2[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
         
         # Bounding box for this triangle
         min_x = max(0, int(np.floor(min(x0, x1, x2))))
@@ -116,6 +119,7 @@ def stl_to_depthmap(stl_path):
                 for pt in largest_contour.squeeze():
                     x_px, y_px = pt
                     x_model = x_px / depth_img.shape[1] * svg_width + min_x
+                    # SVG coordinates: Y=0 at top, same as image coordinates, so no Y-flip needed
                     y_model = y_px / depth_img.shape[0] * svg_height + min_y
                     points.append(f"{x_model},{y_model}")
                 if points:
@@ -132,6 +136,7 @@ def stl_to_depthmap(stl_path):
                 for pt in contour.squeeze():
                     x_px, y_px = pt
                     x_model = x_px / depth_img.shape[1] * svg_width + min_x
+                    # SVG coordinates: Y=0 at top, same as image coordinates, so no Y-flip needed
                     y_model = y_px / depth_img.shape[0] * svg_height + min_y
                     points.append(f"{x_model},{y_model}")
                 if points:
@@ -196,11 +201,11 @@ def stl_to_depthmap(stl_path):
     # Determine aspect ratio and set image size
     x_len, y_len = mesh_dims[0], mesh_dims[1]
     if x_len > y_len:
-        width = 1000  # Reasonable size for performance
-        height = int(1000 * y_len / x_len)
+        width = IMAGE_SIZE
+        height = int(IMAGE_SIZE * y_len / x_len)
     else:
-        height = 1000  
-        width = int(1000 * x_len / y_len)
+        height = IMAGE_SIZE
+        width = int(IMAGE_SIZE * x_len / y_len)
     mesh_height = mesh_dims[2]
 
     if getattr(stl_to_depthmap, 'verbose', False):
@@ -340,7 +345,8 @@ def stl_to_depthmap(stl_path):
             x_px, y_px = pt
             
             x_model = x_px / depth_img.shape[1] * mesh_dims[0] + min_bound[0]
-            y_model = y_px / depth_img.shape[0] * mesh_dims[1]
+            # SVG coordinates: Y=0 at top, same as image coordinates, so no Y-flip needed
+            y_model = y_px / depth_img.shape[0] * mesh_dims[1] + min_bound[1]
             points.append(f"{x_model},{y_model}")
         if points:
             path_str = "M " + " L ".join(points) + " Z"
@@ -471,35 +477,51 @@ def stl_to_depthmap_sliced(stl_path, slice_height):
         print(f"Mesh height: {mesh_height}mm")
         print(f"Slice height: {slice_height}mm")
     
-    # Calculate number of slices needed
-    num_slices = int(np.ceil(mesh_height / slice_height))
+    # Calculate number of slices needed and distribute remainder to the bottom slice
+    rem = mesh_height % slice_height
+    num_full = int(mesh_height // slice_height)
+    num_slices = num_full + (1 if rem > 0 else 0)
     if getattr(stl_to_depthmap, 'verbose', False):
-        print(f"Creating {num_slices} slices of {slice_height}mm each")
-    
+        if rem > 0:
+            print(f"Creating {num_slices} slices: 1 of {rem:.1f}mm, {num_full} of {slice_height}mm each")
+        else:
+            print(f"Creating {num_slices} slices of {slice_height}mm each")
+
     # Step 1: Generate full contour on complete model first
     if getattr(stl_to_depthmap, 'verbose', False):
         print("Generating overall contours from full model...")
     full_depth_img, full_contours, mesh_info = generate_depth_image(mesh)
-    
+
     # Step 2: Create individual slices
     slice_data = []
     base_filename = os.path.splitext(stl_path)[0]
-    
-    for slice_idx in range(num_slices):
-        slice_start = slice_idx * slice_height
-        slice_end = min((slice_idx + 1) * slice_height, mesh_height)
-        
+
+    slice_bounds = []
+    if rem > 0:
+        # First slice is the small one at the bottom
+        slice_bounds.append((0, rem))
+        for i in range(num_full):
+            start = rem + i * slice_height
+            end = min(rem + (i + 1) * slice_height, mesh_height)
+            slice_bounds.append((start, end))
+    else:
+        for i in range(num_full):
+            start = i * slice_height
+            end = min((i + 1) * slice_height, mesh_height)
+            slice_bounds.append((start, end))
+
+    for slice_idx, (slice_start, slice_end) in enumerate(slice_bounds):
         if getattr(stl_to_depthmap, 'verbose', False):
             print(f"\nSlice {slice_idx + 1} ({slice_start:.1f}mm to {slice_end:.1f}mm):")
-        
+
         # Generate depth image for this slice
         slice_depth_img = generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_info)
-        
+
         # Count non-transparent pixels and get value range
         non_transparent = (slice_depth_img > 0) & (slice_depth_img < 255)  # Gradients within slice
         white_pixels = (slice_depth_img == 255)  # Surfaces exceeding slice depth
         total_non_transparent = np.sum(non_transparent) + np.sum(white_pixels)
-        
+
         if getattr(stl_to_depthmap, 'verbose', False):
             if total_non_transparent > 0:
                 print(f"  Non-transparent pixels: {total_non_transparent}")
@@ -512,7 +534,7 @@ def stl_to_depthmap_sliced(stl_path, slice_height):
             else:
                 print(f"  Non-transparent pixels: 0")
                 print(f"  Value range: N/A to N/A")
-        
+
         slice_data.append({
             'depth_img': slice_depth_img,
             'start': slice_start,
@@ -543,78 +565,66 @@ def generate_depth_image(mesh):
     # Use same rendering logic as main function
     x_len, y_len = mesh_dims[0], mesh_dims[1]
     if x_len > y_len:
-        width = 1000
-        height = int(1000 * y_len / x_len)
+        width = IMAGE_SIZE
+        height = int(IMAGE_SIZE * y_len / x_len)
     else:
-        height = 1000  
-        width = int(1000 * x_len / y_len)
+        height = IMAGE_SIZE
+        width = int(IMAGE_SIZE * x_len / y_len)
 
     # Use the triangle rasterization from main function
     triangles = np.asarray(mesh.triangles)
     vertices = np.asarray(mesh.vertices)
-    
-    # Render full depth map
-    ss_factor = 2
-    ss_width = width * ss_factor
-    ss_height = height * ss_factor
-    depth_buffer = np.full((ss_height, ss_width), -np.inf, dtype=np.float32)
-    
+    # Render full depth map without supersampling
+    depth_buffer = np.full((height, width), -np.inf, dtype=np.float32)
+
     for tri_idx, triangle in enumerate(triangles):
         v0, v1, v2 = vertices[triangle]
-        
+
         # Convert to screen coordinates
-        x0 = (v0[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
-        y0 = (v0[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
-        x1 = (v1[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
-        y1 = (v1[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
-        x2 = (v2[0] - min_bound[0]) / mesh_dims[0] * (ss_width - 1)
-        y2 = (v2[1] - min_bound[1]) / mesh_dims[1] * (ss_height - 1)
-        
+        # Note: Flip Y coordinate to correct for image coordinate system (Y=0 at top)
+        x0 = (v0[0] - min_bound[0]) / mesh_dims[0] * (width - 1)
+        y0 = (height - 1) - (v0[1] - min_bound[1]) / mesh_dims[1] * (height - 1)
+        x1 = (v1[0] - min_bound[0]) / mesh_dims[0] * (width - 1)
+        y1 = (height - 1) - (v1[1] - min_bound[1]) / mesh_dims[1] * (height - 1)
+        x2 = (v2[0] - min_bound[0]) / mesh_dims[0] * (width - 1)
+        y2 = (height - 1) - (v2[1] - min_bound[1]) / mesh_dims[1] * (height - 1)
+
         # Rasterize triangle (same logic as main function)
         min_x = max(0, int(np.floor(min(x0, x1, x2))))
-        max_x = min(ss_width-1, int(np.ceil(max(x0, x1, x2))))
+        max_x = min(width-1, int(np.ceil(max(x0, x1, x2))))
         min_y = max(0, int(np.floor(min(y0, y1, y2))))
-        max_y = min(ss_height-1, int(np.ceil(max(y0, y1, y2))))
-        
+        max_y = min(height-1, int(np.ceil(max(y0, y1, y2))))
+
         if min_x > max_x or min_y > max_y:
             continue
-        
+
         for py in range(min_y, max_y + 1):
             for px in range(min_x, max_x + 1):
                 denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
                 if abs(denom) < 1e-10:
                     continue
-                
+
                 w0 = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) / denom
                 w1 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) / denom
                 w2 = 1 - w0 - w1
-                
+
                 tolerance = -1e-6
                 if w0 >= tolerance and w1 >= tolerance and w2 >= tolerance:
                     depth = w0 * v0[2] + w1 * v1[2] + w2 * v2[2]
                     if depth > depth_buffer[py, px]:
                         depth_buffer[py, px] = depth
-    
-    # Downsample
+
+    # Handle invalid values
     valid_mask = depth_buffer != -np.inf
     if np.any(valid_mask):
         min_depth = np.min(depth_buffer[valid_mask])
         depth_buffer[~valid_mask] = min_depth
     else:
         depth_buffer[:] = 0
-    
-    depth_downsampled = np.zeros((height, width), dtype=np.float32)
-    for y in range(height):
-        for x in range(width):
-            y_start = y * ss_factor
-            x_start = x * ss_factor
-            region = depth_buffer[y_start:y_start+ss_factor, x_start:x_start+ss_factor]
-            depth_downsampled[y, x] = np.mean(region)
-    
+
     # Apply smoothing
     from scipy import ndimage
-    depth_np = ndimage.gaussian_filter(depth_downsampled, sigma=0.5)
-    
+    depth_np = ndimage.gaussian_filter(depth_buffer, sigma=0.5)
     # Normalize and convert to image
     depth_min = np.min(depth_np)
     depth_max = np.max(depth_np)
