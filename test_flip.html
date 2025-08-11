@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test WebGL Depth Map Fix</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        canvas { border: 1px solid #ccc; margin: 10px; }
+        .container { display: flex; flex-wrap: wrap; }
+        .section { margin: 10px; }
+    </style>
+</head>
+<body>
+    <h1>WebGL Depth Map Flip Test</h1>
+    <div class="container">
+        <div class="section">
+            <h3>Test Pattern (Before Fix)</h3>
+            <canvas id="testCanvas" width="256" height="256"></canvas>
+            <p>This should show a gradient from top to bottom</p>
+        </div>
+        <div class="section">
+            <h3>Test Pattern (After Fix)</h3>
+            <canvas id="fixedCanvas" width="256" height="256"></canvas>
+            <p>This should show the same gradient, correctly oriented</p>
+        </div>
+    </div>
+
+    <script>
+        // Create a simple test to demonstrate the flip
+        function createTestPattern() {
+            const canvas = document.getElementById('testCanvas');
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(256, 256);
+            
+            // Create a vertical gradient (top black, bottom white)
+            for (let y = 0; y < 256; y++) {
+                for (let x = 0; x < 256; x++) {
+                    const index = (y * 256 + x) * 4;
+                    const value = y; // Gradient from 0 (top) to 255 (bottom)
+                    imageData.data[index + 0] = value; // R
+                    imageData.data[index + 1] = value; // G
+                    imageData.data[index + 2] = value; // B
+                    imageData.data[index + 3] = 255;   // A
+                }
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+        }
+        
+        function createFixedTestPattern() {
+            const canvas = document.getElementById('fixedCanvas');
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(256, 256);
+            
+            // Simulate WebGL pixels that need to be flipped
+            const mockWebGLData = new Uint8Array(256 * 256 * 4);
+            
+            // Fill mock WebGL data as if it came from readRenderTargetPixels
+            // (which reads with Y=0 at bottom, so bottom row first)
+            for (let y = 0; y < 256; y++) {
+                for (let x = 0; x < 256; x++) {
+                    const index = (y * 256 + x) * 4;
+                    const value = 255 - y; // Inverted gradient as it would come from WebGL
+                    mockWebGLData[index + 0] = value;
+                    mockWebGLData[index + 1] = value;
+                    mockWebGLData[index + 2] = value;
+                    mockWebGLData[index + 3] = 255;
+                }
+            }
+            
+            // Apply the fix: flip Y coordinates when copying to canvas
+            for (let y = 0; y < 256; y++) {
+                for (let x = 0; x < 256; x++) {
+                    const srcIndex = ((256 - 1 - y) * 256 + x) * 4; // Flip Y coordinate
+                    const dstIndex = (y * 256 + x) * 4;
+                    
+                    const r = mockWebGLData[srcIndex];
+                    imageData.data[dstIndex + 0] = r;
+                    imageData.data[dstIndex + 1] = r;
+                    imageData.data[dstIndex + 2] = r;
+                    imageData.data[dstIndex + 3] = 255;
+                }
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+        }
+        
+        // Run the tests
+        createTestPattern();
+        createFixedTestPattern();
+    </script>
+</body>
+</html>
