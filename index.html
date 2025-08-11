@@ -758,21 +758,21 @@
             }, 'image/png');
         }
 
-        // Simple contour finding algorithm for JavaScript - based on Python script approach
+        // Contour finding algorithm - based on Python script approach using cv2.findContours logic
         function findContours(imageData, width, height) {
-            // Create a binary mask where opaque pixels are 255 and transparent pixels are 0
+            // Create a binary mask matching Python script: transparent pixels (alpha=0) become 255, opaque become 0
             const mask = new Uint8Array(width * height);
             for (let i = 0; i < width * height; i++) {
                 const alpha = imageData.data[i * 4 + 3];
-                mask[i] = alpha > 0 ? 255 : 0;
+                mask[i] = alpha === 0 ? 255 : 0; // Transparent areas become foreground (255)
             }
             
-            // Pad the mask with a 1-pixel border of zeros (transparent)
+            // Pad the mask with a 1-pixel border of zeros 
             const paddedWidth = width + 2;
             const paddedHeight = height + 2;
             const paddedMask = new Uint8Array(paddedWidth * paddedHeight);
             
-            // Fill padded mask
+            // Fill padded mask (borders stay 0, interior is copied)
             for (let y = 0; y < height; y++) {
                 for (let x = 0; x < width; x++) {
                     const srcIdx = y * width + x;
@@ -781,74 +781,102 @@
                 }
             }
             
-            // Find contours by looking for transitions from 0 to 255
+            // Find contours using Moore neighborhood boundary following
             const contours = [];
             const visited = new Array(paddedWidth * paddedHeight).fill(false);
+            
+            // 8-direction offsets (Moore neighborhood) starting from right and going clockwise
+            const directions = [[1,0], [1,1], [0,1], [-1,1], [-1,0], [-1,-1], [0,-1], [1,-1]];
             
             for (let y = 1; y < paddedHeight - 1; y++) {
                 for (let x = 1; x < paddedWidth - 1; x++) {
                     const idx = y * paddedWidth + x;
                     
-                    // Skip if already visited or if this is a background pixel
+                    // Skip if already visited or not a foreground pixel
                     if (visited[idx] || paddedMask[idx] === 0) continue;
                     
-                    // Check if this is a boundary pixel (has at least one transparent neighbor)
-                    const hasTransparentNeighbor = 
-                        paddedMask[idx - 1] === 0 ||           // left
-                        paddedMask[idx + 1] === 0 ||           // right  
-                        paddedMask[idx - paddedWidth] === 0 || // up
-                        paddedMask[idx + paddedWidth] === 0;   // down
-                    
-                    if (!hasTransparentNeighbor) continue;
-                    
-                    // Trace the boundary
-                    const contour = [];
-                    const toVisit = [[x, y]];
-                    
-                    while (toVisit.length > 0) {
-                        const [cx, cy] = toVisit.pop();
-                        const cidx = cy * paddedWidth + cx;
-                        
-                        if (visited[cidx] || cx < 1 || cx >= paddedWidth - 1 || 
-                            cy < 1 || cy >= paddedHeight - 1 || paddedMask[cidx] === 0) {
-                            continue;
-                        }
-                        
-                        visited[cidx] = true;
-                        
-                        // Check if this pixel is on the boundary  
-                        const isBoundary = 
-                            paddedMask[cidx - 1] === 0 ||           // left
-                            paddedMask[cidx + 1] === 0 ||           // right
-                            paddedMask[cidx - paddedWidth] === 0 || // up  
-                            paddedMask[cidx + paddedWidth] === 0;   // down
-                        
-                        if (isBoundary) {
-                            // Convert back to original coordinates (remove padding offset)
-                            contour.push([cx - 1, cy - 1]);
-                        }
-                        
-                        // Add 8-connected neighbors
-                        for (let dy = -1; dy <= 1; dy++) {
-                            for (let dx = -1; dx <= 1; dx++) {
-                                if (dx === 0 && dy === 0) continue;
-                                const nx = cx + dx;
-                                const ny = cy + dy;
-                                if (nx >= 1 && nx < paddedWidth - 1 && ny >= 1 && ny < paddedHeight - 1) {
-                                    const nidx = ny * paddedWidth + nx;
-                                    if (!visited[nidx] && paddedMask[nidx] === 255) {
-                                        toVisit.push([nx, ny]);
-                                    }
-                                }
+                    // Check if this is a border pixel (has at least one background neighbor)
+                    let isBorder = false;
+                    for (let [dx, dy] of directions) {
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx >= 0 && nx < paddedWidth && ny >= 0 && ny < paddedHeight) {
+                            const nidx = ny * paddedWidth + nx;
+                            if (paddedMask[nidx] === 0) {
+                                isBorder = true;
+                                break;
                             }
                         }
                     }
                     
+                    if (!isBorder) continue;
+                    
+                    // Trace the contour using Moore boundary following
+                    const contour = [];
+                    let startX = x, startY = y;
+                    let currentX = x, currentY = y;
+                    
+                    do {
+                        contour.push([currentX - 1, currentY - 1]); // Convert back to original coordinates
+                        visited[currentY * paddedWidth + currentX] = true;
+                        
+                        // Find next contour pixel using Moore neighborhood
+                        let found = false;
+                        for (let [dx, dy] of directions) {
+                            const nx = currentX + dx;
+                            const ny = currentY + dy;
+                            if (nx >= 0 && nx < paddedWidth && ny >= 0 && ny < paddedHeight) {
+                                const nidx = ny * paddedWidth + nx;
+                                if (paddedMask[nidx] === 255 && !visited[nidx]) {
+                                    // Check if this neighbor is also a border pixel
+                                    let isNeighborBorder = false;
+                                    for (let [dx2, dy2] of directions) {
+                                        const nnx = nx + dx2;
+                                        const nny = ny + dy2;
+                                        if (nnx >= 0 && nnx < paddedWidth && nny >= 0 && nny < paddedHeight) {
+                                            if (paddedMask[nny * paddedWidth + nnx] === 0) {
+                                                isNeighborBorder = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (isNeighborBorder) {
+                                        currentX = nx;
+                                        currentY = ny;
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (!found) break;
+                        
+                    } while (currentX !== startX || currentY !== startY);
+                    
                     // Only keep contours with significant number of points
-                    if (contour.length > 5) {
+                    if (contour.length > 8) {
                         contours.push(contour);
                     }
                 }
+            }
+            
+            // Remove the largest contour (outermost boundary) like the Python script does
+            if (contours.length > 1) {
+                const areas = contours.map(contour => {
+                    // Calculate approximate area using shoelace formula
+                    let area = 0;
+                    for (let i = 0; i < contour.length; i++) {
+                        const j = (i + 1) % contour.length;
+                        area += contour[i][0] * contour[j][1];
+                        area -= contour[j][0] * contour[i][1];
+                    }
+                    return Math.abs(area) / 2;
+                });
+                
+                const maxAreaIndex = areas.indexOf(Math.max(...areas));
+                contours.splice(maxAreaIndex, 1);
             }
             
             return contours;
@@ -982,8 +1010,8 @@
                     imageData.data[dstIndex + 0] = r;
                     imageData.data[dstIndex + 1] = r;
                     imageData.data[dstIndex + 2] = r;
-                    // Make black (0) and white (255) transparent, gray values opaque
-                    imageData.data[dstIndex + 3] = (r === 0 || r === 255) ? 0 : 255;
+                    // Make black (0-2) and white (253-255) transparent, gray values opaque
+                    imageData.data[dstIndex + 3] = (r <= 2 || r >= 253) ? 0 : 255;
                 }
             }
             ctx.putImageData(imageData, 0, 0);
