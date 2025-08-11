@@ -792,12 +792,9 @@
                 binaryMask[i] = (paddedImage[i] <= 2) ? 255 : 0;
             }
             
-            // Step 4: Find external contours using improved algorithm
+            // Step 4: Find all contours using connected component labeling approach
             const contours = [];
             const visited = new Array(paddedWidth * paddedHeight).fill(false);
-            
-            // 8-direction offsets for Moore neighborhood
-            const directions = [[1,0], [1,1], [0,1], [-1,1], [-1,0], [-1,-1], [0,-1], [1,-1]];
             
             // Scan for contour starting points
             for (let y = 1; y < paddedHeight - 1; y++) {
@@ -807,24 +804,8 @@
                     // Skip if already visited or not a foreground pixel
                     if (visited[idx] || binaryMask[idx] === 0) continue;
                     
-                    // Check if this is an external contour point (has background neighbor)
-                    let hasBackgroundNeighbor = false;
-                    for (let [dx, dy] of directions) {
-                        const nx = x + dx;
-                        const ny = y + dy;
-                        if (nx >= 0 && nx < paddedWidth && ny >= 0 && ny < paddedHeight) {
-                            const nidx = ny * paddedWidth + nx;
-                            if (binaryMask[nidx] === 0) {
-                                hasBackgroundNeighbor = true;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (!hasBackgroundNeighbor) continue;
-                    
-                    // Trace the external contour using border following algorithm
-                    const contour = traceContour(binaryMask, paddedWidth, paddedHeight, x, y, visited);
+                    // Find connected component and trace its boundary
+                    const contour = findConnectedComponentBoundary(binaryMask, paddedWidth, paddedHeight, x, y, visited);
                     
                     // Convert coordinates back to original image space (remove padding offset)
                     const adjustedContour = contour.map(([px, py]) => [px - 1, py - 1]);
@@ -836,63 +817,116 @@
                 }
             }
             
+            // Step 5: Remove the largest contour (outermost boundary) like Python script does
+            if (contours.length > 1) {
+                const areas = contours.map(contour => {
+                    // Calculate area using shoelace formula
+                    let area = 0;
+                    for (let i = 0; i < contour.length; i++) {
+                        const j = (i + 1) % contour.length;
+                        area += contour[i][0] * contour[j][1];
+                        area -= contour[j][0] * contour[i][1];
+                    }
+                    return Math.abs(area) / 2;
+                });
+                
+                const maxAreaIndex = areas.indexOf(Math.max(...areas));
+                console.log(`Removing largest contour with area: ${areas[maxAreaIndex]}, keeping ${contours.length - 1} contours`);
+                contours.splice(maxAreaIndex, 1);
+            }
+            
             return contours;
         }
         
-        // Improved contour tracing using border following algorithm
-        function traceContour(binaryMask, width, height, startX, startY, visited) {
-            const contour = [];
+        // Find boundary of a connected component using flood fill + boundary tracing
+        function findConnectedComponentBoundary(binaryMask, width, height, startX, startY, visited) {
             const directions = [[1,0], [1,1], [0,1], [-1,1], [-1,0], [-1,-1], [0,-1], [1,-1]];
             
-            let currentX = startX;
-            let currentY = startY;
-            let dirIndex = 0; // Start facing right
+            // First, mark all pixels in this connected component
+            const component = [];
+            const stack = [[startX, startY]];
             
-            do {
-                contour.push([currentX, currentY]);
-                visited[currentY * width + currentX] = true;
+            while (stack.length > 0) {
+                const [x, y] = stack.pop();
+                const idx = y * width + x;
                 
-                // Find next boundary pixel using 8-connectivity
-                let foundNext = false;
-                for (let i = 0; i < 8; i++) {
-                    const checkDirIndex = (dirIndex + i) % 8;
-                    const [dx, dy] = directions[checkDirIndex];
-                    const nextX = currentX + dx;
-                    const nextY = currentY + dy;
-                    
-                    if (nextX >= 0 && nextX < width && nextY >= 0 && nextY < height) {
-                        const nextIdx = nextY * width + nextX;
-                        if (binaryMask[nextIdx] === 255) {
-                            // Check if this pixel is also on the boundary
-                            let isBoundary = false;
-                            for (let [dx2, dy2] of directions) {
-                                const nnx = nextX + dx2;
-                                const nny = nextY + dy2;
-                                if (nnx >= 0 && nnx < width && nny >= 0 && nny < height) {
-                                    if (binaryMask[nny * width + nnx] === 0) {
-                                        isBoundary = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            
-                            if (isBoundary) {
-                                currentX = nextX;
-                                currentY = nextY;
-                                dirIndex = (checkDirIndex + 6) % 8; // Adjust direction for next search
-                                foundNext = true;
-                                break;
-                            }
+                if (x < 0 || x >= width || y < 0 || y >= height || visited[idx] || binaryMask[idx] === 0) {
+                    continue;
+                }
+                
+                visited[idx] = true;
+                component.push([x, y]);
+                
+                // Add 4-connected neighbors to stack
+                stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+            }
+            
+            if (component.length === 0) return [];
+            
+            // Now find the boundary pixels of this component
+            const boundaryPixels = [];
+            for (const [x, y] of component) {
+                // Check if this pixel is on the boundary (has at least one background neighbor)
+                let isBoundary = false;
+                for (const [dx, dy] of directions) {
+                    const nx = x + dx;
+                    const ny = y + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                        const nidx = ny * width + nx;
+                        if (binaryMask[nidx] === 0) {
+                            isBoundary = true;
+                            break;
+                        }
+                    } else {
+                        // Edge of image is also considered boundary
+                        isBoundary = true;
+                        break;
+                    }
+                }
+                
+                if (isBoundary) {
+                    boundaryPixels.push([x, y]);
+                }
+            }
+            
+            if (boundaryPixels.length === 0) return [];
+            
+            // Sort boundary pixels to form a coherent contour path
+            // Start from leftmost pixel, then topmost if tied
+            boundaryPixels.sort((a, b) => {
+                if (a[0] !== b[0]) return a[0] - b[0];
+                return a[1] - b[1];
+            });
+            
+            // Create contour path by connecting boundary pixels in order
+            const contour = [];
+            const usedPixels = new Set();
+            let currentPixel = boundaryPixels[0];
+            
+            while (currentPixel && !usedPixels.has(`${currentPixel[0]},${currentPixel[1]}`)) {
+                contour.push(currentPixel);
+                usedPixels.add(`${currentPixel[0]},${currentPixel[1]}`);
+                
+                // Find next closest boundary pixel
+                let nextPixel = null;
+                let minDist = Infinity;
+                
+                for (const pixel of boundaryPixels) {
+                    const key = `${pixel[0]},${pixel[1]}`;
+                    if (!usedPixels.has(key)) {
+                        const dist = Math.abs(pixel[0] - currentPixel[0]) + Math.abs(pixel[1] - currentPixel[1]);
+                        if (dist <= 2 && dist < minDist) { // Allow diagonal connections
+                            minDist = dist;
+                            nextPixel = pixel;
                         }
                     }
                 }
                 
-                if (!foundNext) break;
+                currentPixel = nextPixel;
                 
                 // Prevent infinite loops
-                if (contour.length > width * height) break;
-                
-            } while (currentX !== startX || currentY !== startY || contour.length < 3);
+                if (contour.length > boundaryPixels.length * 2) break;
+            }
             
             return contour;
         }
