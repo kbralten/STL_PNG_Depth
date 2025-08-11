@@ -67,7 +67,7 @@ clean:
 install:
 	@echo "Installing/checking dependencies..."
 	@if [ -f "pb/bin/activate" ]; then \
-		. pb/bin/activate && pip install pillow numpy opencv-python scipy open3d; \
+		. pb/bin/activate && pip install -r requirements.txt; \
 	else \
-		pip install pillow numpy opencv-python scipy open3d; \
+		pip install -r requirements.txt; \
 	fi

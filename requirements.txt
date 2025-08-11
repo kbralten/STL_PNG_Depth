@@ -1,0 +1,12 @@
+# STL to Depth Map Converter - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core dependencies
+open3d>=0.18.0
+numpy>=1.18.0
+Pillow>=8.0.0
+opencv-python>=4.5.0
+scipy>=1.7.0
+
+# Optional: For better performance on some systems
+# matplotlib>=3.3.0  # Uncomment if you need additional plotting capabilities

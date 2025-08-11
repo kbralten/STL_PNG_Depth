@@ -6,3 +6,4 @@ foam.svg
 #ignore the environment directory
 /pb/
 *.pyc
+/.venv*/

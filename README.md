@@ -26,24 +26,61 @@ This project converts 3D STL mesh files into depth map images and SVGs suitable 
 ## Requirements
 
 ### Python Program
-- Python 3.8+
+- Python 3.8+ (Note: Open3D doesn't support Python 3.13 yet, use Python 3.12 or earlier)
 - open3d
 - numpy
 - Pillow
 - opencv-python
+- scipy
+
+### Dependency Files
+- `requirements.txt` - Core dependencies needed to run the program
+- `requirements-dev.txt` - Additional development dependencies (testing, linting, documentation)
 
 Install dependencies with:
 ```bash
-pip install open3d numpy Pillow opencv-python
+pip install -r requirements.txt
+```
+
+For development (includes testing, linting, and documentation tools):
+```bash
+pip install -r requirements-dev.txt
+```
+
+Or manually:
+```bash
+pip install open3d numpy Pillow opencv-python scipy
+```
+
+**Windows Setup Note**: If you're using Python 3.13, you'll need to install Python 3.12 as Open3D doesn't support Python 3.13 yet. You can install Python 3.12 using:
+```bash
+winget install Python.Python.3.12
+```
+
+Then create a virtual environment with Python 3.12:
+```bash
+# Use full path to Python 3.12
+C:\Users\[username]\AppData\Local\Programs\Python\Python312\python.exe -m venv .venv312
+.venv312\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 ## Usage
 
+### Windows Quick Start
+Use the provided batch file for easy execution:
+```cmd
+run_stl_to_depthmap.bat foam.stl --verbose
+```
 
 ### Python Program
 
 ```bash
 python stl_to_depthmap.py <input.stl> [--slice-height HEIGHT] [--only-png] [--only-svg] [--svg-contours] [--segment] [--verbose]
+```
+
+Or on Windows with the Python 3.12 environment:
+```cmd
+.venv312\Scripts\python.exe stl_to_depthmap.py <input.stl> [options]
 ```
 
 #### Arguments
