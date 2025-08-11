@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import sys
 import os
@@ -14,11 +13,41 @@ from PIL import Image
 from io import BytesIO
 import base64
 import cv2
-from scipy.ndimage import gaussian_filter
 from multiprocessing import Pool, cpu_count
 import multiprocessing as mp
 
 IMAGE_SIZE = 1000
+
+def get_orientation_normal(mesh, orientation):
+    """Get the normal vector for the specified orientation"""
+    if orientation == "auto":
+        # Find the largest face (triangle) by area
+        triangles = np.asarray(mesh.triangles)
+        vertices = np.asarray(mesh.vertices)
+        max_area = 0
+        largest_face_normal = np.array([0, 0, 1])
+        for tri in triangles:
+            v0, v1, v2 = vertices[tri]
+            area = np.linalg.norm(np.cross(v1 - v0, v2 - v0)) / 2.0
+            if area > max_area:
+                max_area = area
+                # Compute normal
+                normal = np.cross(v1 - v0, v2 - v0)
+                normal = normal / np.linalg.norm(normal) * -1
+                largest_face_normal = normal
+        return largest_face_normal
+    
+    # Manual orientation mappings
+    orientation_map = {
+        "top": np.array([0, 0, -1]),     # Top face down (negative Z)
+        "bottom": np.array([0, 0, 1]),   # Bottom face down (positive Z)
+        "front": np.array([0, 1, 0]),    # Front face down (positive Y)
+        "back": np.array([0, -1, 0]),    # Back face down (negative Y)
+        "left": np.array([1, 0, 0]),     # Left face down (positive X)
+        "right": np.array([-1, 0, 0])    # Right face down (negative X)
+    }
+    
+    return orientation_map.get(orientation, np.array([0, 0, 1]))
 
 def rasterize_triangle_batch(args):
     """Unified triangle rasterization with optional slice filtering"""
@@ -100,7 +129,7 @@ def rasterize_triangle_batch(args):
 # Configure Open3D for headless operation
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Warning)
 
-def stl_to_depthmap(stl_path):
+def stl_to_depthmap(stl_path, orientation="auto"):
     def write_svg_contours(depth_img, mesh_dims, min_bound, stl_path, overall_contours):
         mask = ((depth_img > 1) & (depth_img < 254)).astype(np.uint8)
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
@@ -118,6 +147,9 @@ def stl_to_depthmap(stl_path):
                 points = []
                 for pt in largest_contour.squeeze():
                     x_px, y_px = pt
+                    # Adjust for the 1-pixel padding offset
+                    x_px -= 1
+                    y_px -= 1
                     x_model = x_px / depth_img.shape[1] * svg_width + min_x
                     # SVG coordinates: Y=0 at top, same as image coordinates, so no Y-flip needed
                     y_model = y_px / depth_img.shape[0] * svg_height + min_y
@@ -158,25 +190,13 @@ def stl_to_depthmap(stl_path):
     mesh = o3d.io.read_triangle_mesh(stl_path)
     mesh.compute_vertex_normals()
 
-    # Find the largest face (triangle) by area
-    triangles = np.asarray(mesh.triangles)
-    vertices = np.asarray(mesh.vertices)
-    max_area = 0
-    largest_face_normal = np.array([0, 0, 1])
-    for tri in triangles:
-        v0, v1, v2 = vertices[tri]
-        area = np.linalg.norm(np.cross(v1 - v0, v2 - v0)) / 2.0
-        if area > max_area:
-            max_area = area
-            # Compute normal
-            normal = np.cross(v1 - v0, v2 - v0)
-            normal = normal / np.linalg.norm(normal) *-1
-            largest_face_normal = normal
+    # Get the orientation normal based on user preference
+    target_normal = get_orientation_normal(mesh, orientation)
 
-    # Compute rotation to align largest face normal to +Z
+    # Compute rotation to align the chosen normal to +Z
     z_axis = np.array([0, 0, 1])
-    axis = np.cross(largest_face_normal, z_axis)
-    angle = np.arccos(np.clip(np.dot(largest_face_normal, z_axis), -1.0, 1.0))
+    axis = np.cross(target_normal, z_axis)
+    angle = np.arccos(np.clip(np.dot(target_normal, z_axis), -1.0, 1.0))
     if np.linalg.norm(axis) > 1e-6 and angle > 1e-6:
         axis = axis / np.linalg.norm(axis)
         R = o3d.geometry.get_rotation_matrix_from_axis_angle(axis * angle)
@@ -188,7 +208,7 @@ def stl_to_depthmap(stl_path):
     translation = -min_bound
     mesh.translate(translation)
 
-    # Use proper triangle rasterization with anti-aliasing for smooth depth rendering
+    # Use proper triangle rasterization for depth rendering
     import gc
     from scipy import ndimage
     
@@ -217,19 +237,20 @@ def stl_to_depthmap(stl_path):
     if getattr(stl_to_depthmap, 'verbose', False):
         print(f"Center: {center}")
 
-    # Use optimized triangle rasterization with supersampling for anti-aliasing
+    # Use optimized triangle rasterization with supersampling for crisp edges
     try:
         if getattr(stl_to_depthmap, 'verbose', False):
-            print("Creating smooth depth image using optimized triangle rasterization...")
+            print("Creating depth image using optimized triangle rasterization...")
         
         triangles = np.asarray(mesh.triangles)
         vertices = np.asarray(mesh.vertices)
         
         if getattr(stl_to_depthmap, 'verbose', False):
-            print(f"Rasterizing {len(triangles)} triangles with anti-aliasing...")
+            print(f"Rasterizing {len(triangles)} triangles...")
         
-        # Use supersampling for anti-aliasing (render at 2x resolution)
-        ss_factor = 2
+        # Use supersampling for crisp edges (render at 2x resolution)
+        # Disable supersampling to prevent gray halos at edges
+        ss_factor = 1
         ss_width = width * ss_factor
         ss_height = height * ss_factor
         
@@ -269,7 +290,7 @@ def stl_to_depthmap(stl_path):
             depth_buffer[mask] = batch_result[mask]
         
         if getattr(stl_to_depthmap, 'verbose', False):
-            print("Triangle rasterization completed, applying anti-aliasing...")
+            print("Triangle rasterization completed...")
         
         # Replace -inf with minimum depth for background
         valid_mask = depth_buffer != -np.inf
@@ -279,7 +300,7 @@ def stl_to_depthmap(stl_path):
         else:
             depth_buffer[:] = 0
         
-        # Downsample with anti-aliasing (box filter)
+        # Downsample (box filter)
         depth_downsampled = np.zeros((height, width), dtype=np.float32)
         for y in range(height):
             for x in range(width):
@@ -289,11 +310,11 @@ def stl_to_depthmap(stl_path):
                 region = depth_buffer[y_start:y_start+ss_factor, x_start:x_start+ss_factor]
                 depth_downsampled[y, x] = np.mean(region)
         
-        # Apply light Gaussian smoothing for final polish
-        depth_np = ndimage.gaussian_filter(depth_downsampled, sigma=0.5)
+        # Use downsampled result directly (no additional smoothing)
+        depth_np = depth_downsampled
         
         if getattr(stl_to_depthmap, 'verbose', False):
-            print("Smooth triangle rasterization completed successfully")
+            print("Triangle rasterization completed successfully")
         
     except Exception as e:
         print(f"Error during triangle rasterization: {e}")
@@ -344,6 +365,10 @@ def stl_to_depthmap(stl_path):
                 continue
             x_px, y_px = pt
             
+            # Adjust for the 1-pixel padding offset
+            x_px -= 1
+            y_px -= 1
+            
             x_model = x_px / depth_img.shape[1] * mesh_dims[0] + min_bound[0]
             # SVG coordinates: Y=0 at top, same as image coordinates, so no Y-flip needed
             y_model = y_px / depth_img.shape[0] * mesh_dims[1] + min_bound[1]
@@ -352,6 +377,7 @@ def stl_to_depthmap(stl_path):
             path_str = "M " + " L ".join(points) + " Z"
             path_elems.append(f'<path d="{path_str}" stroke="rgb(255,219,102)" fill="none" stroke-width="0.5" />')
 
+    # PNG layers for SVG embedding
     png_layers = []
     if getattr(stl_to_depthmap, 'segment', False):
         # Find islands of non-transparent pixels (connected components)
@@ -370,11 +396,15 @@ def stl_to_depthmap(stl_path):
             cropped_mask = island_mask[y0:y1+1, x0:x1+1]
             cropped_depth = depth_img[y0:y1+1, x0:x1+1]
             # Create RGBA image: only pixels in island are visible, rest transparent
-            alpha = np.where(cropped_mask, 255, 0).astype(np.uint8)
-            rgb = np.stack([cropped_depth]*3, axis=-1)
-            rgba = np.concatenate([rgb, alpha[..., None]], axis=-1)
-            # Set black/white pixels to transparent as well
-            rgba[(cropped_depth<=1)|(cropped_depth>=254), 3] = 0
+            # Use same transparency logic as slicing mode - make pure white transparent
+            rgba = np.zeros((cropped_depth.shape[0], cropped_depth.shape[1], 4), dtype=np.uint8)
+            rgba[:, :, 0] = cropped_depth  # R
+            rgba[:, :, 1] = cropped_depth  # G
+            rgba[:, :, 2] = cropped_depth  # B
+            # Make pixels transparent if they're outside the island OR pure white/black
+            alpha_mask = cropped_mask & (cropped_depth > 0) & (cropped_depth < 255)
+            rgba[:, :, 3] = np.where(alpha_mask, 255, 0)  # A: opaque only for valid island pixels
+            
             img = Image.fromarray(rgba)
             buf = BytesIO()
             img.save(buf, format="PNG")
@@ -387,11 +417,15 @@ def stl_to_depthmap(stl_path):
             png_layers.append(f'<image x="{x_svg}" y="{y_svg}" width="{w_svg}" height="{h_svg}" xlink:href="data:image/png;base64,{png_b64}" />')
     else:
         # Include the entire image as a single layer
-        # Create RGBA image with transparency for black/white pixels
-        mask = ((depth_img > 1) & (depth_img < 254)).astype(np.uint8)
-        alpha = np.where(mask, 255, 0).astype(np.uint8)
-        rgb = np.stack([depth_img]*3, axis=-1)
-        rgba = np.concatenate([rgb, alpha[..., None]], axis=-1)
+        # Create RGBA image with transparency for both black (0) and white (255) pixels
+        rgba = np.zeros((depth_img.shape[0], depth_img.shape[1], 4), dtype=np.uint8)
+        rgba[:, :, 0] = depth_img  # R
+        rgba[:, :, 1] = depth_img  # G
+        rgba[:, :, 2] = depth_img  # B
+        # Make both pure black (0) and pure white (255) transparent, opaque for gray values
+        alpha_mask = (depth_img > 0) & (depth_img < 255)
+        rgba[:, :, 3] = np.where(alpha_mask, 255, 0)  # A: transparent for 0 and 255, opaque otherwise
+        
         img = Image.fromarray(rgba)
         buf = BytesIO()
         img.save(buf, format="PNG")
@@ -429,7 +463,7 @@ def stl_to_depthmap(stl_path):
         del depth_img
     gc.collect()
 
-def stl_to_depthmap_sliced(stl_path, slice_height):
+def stl_to_depthmap_sliced(stl_path, slice_height, orientation="auto"):
     """Create multiple depth map slices from an STL file"""
     import gc
     
@@ -437,24 +471,13 @@ def stl_to_depthmap_sliced(stl_path, slice_height):
     mesh = o3d.io.read_triangle_mesh(stl_path)
     mesh.compute_vertex_normals()
 
-    # Find the largest face and align mesh (same as original function)
-    triangles = np.asarray(mesh.triangles)
-    vertices = np.asarray(mesh.vertices)
-    max_area = 0
-    largest_face_normal = np.array([0, 0, 1])
-    for tri in triangles:
-        v0, v1, v2 = vertices[tri]
-        area = np.linalg.norm(np.cross(v1 - v0, v2 - v0)) / 2.0
-        if area > max_area:
-            max_area = area
-            normal = np.cross(v1 - v0, v2 - v0)
-            normal = normal / np.linalg.norm(normal) * -1
-            largest_face_normal = normal
+    # Get the orientation normal based on user preference
+    target_normal = get_orientation_normal(mesh, orientation)
 
     # Align mesh to Z-axis
     z_axis = np.array([0, 0, 1])
-    axis = np.cross(largest_face_normal, z_axis)
-    angle = np.arccos(np.clip(np.dot(largest_face_normal, z_axis), -1.0, 1.0))
+    axis = np.cross(target_normal, z_axis)
+    angle = np.arccos(np.clip(np.dot(target_normal, z_axis), -1.0, 1.0))
     if np.linalg.norm(axis) > 1e-6 and angle > 1e-6:
         axis = axis / np.linalg.norm(axis)
         R = o3d.geometry.get_rotation_matrix_from_axis_angle(axis * angle)
@@ -622,9 +645,8 @@ def generate_depth_image(mesh):
     else:
         depth_buffer[:] = 0
 
-    # Apply smoothing
-    from scipy import ndimage
-    depth_np = ndimage.gaussian_filter(depth_buffer, sigma=0.5)
+    # Use depth buffer directly (no smoothing)
+    depth_np = depth_buffer
     # Normalize and convert to image
     depth_min = np.min(depth_np)
     depth_max = np.max(depth_np)
@@ -683,7 +705,8 @@ def generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_i
     triangles = np.asarray(mesh.triangles)
     vertices = np.asarray(mesh.vertices)
     
-    ss_factor = 2
+    # Disable supersampling to prevent gray halos at edges
+    ss_factor = 1
     ss_width = width * ss_factor
     ss_height = height * ss_factor
     
@@ -726,9 +749,8 @@ def generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_i
             else:
                 depth_downsampled[y, x] = -np.inf
     
-    # Apply smoothing only to valid areas
-    smoothed = ndimage.gaussian_filter(depth_downsampled, sigma=0.5)
-    depth_np = np.where(depth_downsampled != -np.inf, smoothed, depth_downsampled)
+    # Use downsampled result directly (no smoothing)
+    depth_np = depth_downsampled
     
     # Convert to image with proper transparency and black handling
     depth_img = np.zeros((height, width), dtype=np.uint8)
@@ -880,6 +902,9 @@ def generate_sliced_svg(slice_data, contours, mesh_info, base_filename, mesh_hei
             if len(pt.shape) == 0:
                 continue
             x_px, y_px = pt
+            # Adjust for the 1-pixel padding offset
+            x_px -= 1
+            y_px -= 1
             x_model = x_px / width * mesh_info['mesh_dims'][0] + min_bound[0]
             y_model = y_px / height * mesh_info['mesh_dims'][1]
             points.append(f"{x_model},{y_model}")
@@ -913,6 +938,8 @@ if __name__ == "__main__":
     parser.add_argument("--svg-contours", action="store_true", help="Write SVG file with only contours for each island")
     parser.add_argument("--segment", "-s", action="store_true", help="Split image into separate segments for each island")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
+    parser.add_argument("--orientation", choices=["auto", "top", "bottom", "left", "right", "front", "back"], 
+                        default="auto", help="Specify which face should be oriented down (default: auto - largest face)")
     args = parser.parse_args()
 
     # Feature switches
@@ -926,10 +953,10 @@ if __name__ == "__main__":
     try:
         if args.slice_height:
             # Slicing mode enabled
-            stl_to_depthmap_sliced(args.stl_path, slice_height=args.slice_height)
+            stl_to_depthmap_sliced(args.stl_path, slice_height=args.slice_height, orientation=args.orientation)
         else:
             # Regular single depth map mode
-            stl_to_depthmap(args.stl_path)
+            stl_to_depthmap(args.stl_path, orientation=args.orientation)
     except Exception as e:
         print(f"Error during conversion: {e}", file=sys.stderr)
         sys.exit(1)
