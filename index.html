@@ -131,6 +131,7 @@
             color: #64748b;
             font-style: italic;
         }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
@@ -334,6 +335,7 @@
         function onSTLFileSelected(event) {
             const file = event.target.files[0];
             if (!file) {
+                loadingMessage.classList.add('hidden'); // Hide if no file selected
                 return;
             }
 
@@ -1054,6 +1056,11 @@
                 }
             }
         }
+
+        // Hide loading message on page load
+        document.addEventListener('DOMContentLoaded', function () {
+            loadingMessage.classList.add('hidden');
+        });
 
         window.onload = function () {
             init();
