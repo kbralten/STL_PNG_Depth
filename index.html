@@ -4,20 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>STL to Depthmap</title>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="three.min.js"></script>
     <!-- Include STLLoader (using the .js version for global THREE object extension) -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    <script src="STLLoader.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- OpenCV.js for contour detection -->
+    <script async src="https://docs.opencv.org/4.x/opencv.js" onload="window.cvReady=true;"></script>
     <style>
         body {
             margin: 0;
-            overflow: hidden;
+            overflow: auto;
             font-family: 'Inter', sans-serif;
             background-color: #f0f2f5;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;
             min-height: 100vh;
             padding: 1rem;
         }
@@ -125,7 +127,16 @@
         <div class="canvas-wrapper">
             <h2 class="text-xl font-semibold">Extracted Grayscale Depth Map (Orthographic)</h2>
             <canvas id="depthCanvas"></canvas>
-            <button id="downloadDepthBtn" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">Download Depth Map (PNG)</button>
+            <div class="mt-4 flex gap-2 flex-wrap justify-center">
+                <button id="downloadDepthBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">Download Depth Map (PNG)</button>
+                <button id="downloadSvgBtn" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition">Download SVG</button>
+            </div>
+        </div>
+        <div class="canvas-wrapper">
+            <h2 class="text-xl font-semibold">SVG Preview with Transparency & Contours</h2>
+            <div id="svgPreview" class="w-full border border-gray-300 rounded bg-white p-4 min-h-[300px] flex items-center justify-center">
+                <p class="text-gray-500">SVG preview will appear here after loading a model</p>
+            </div>
         </div>
     </div>
 
@@ -238,24 +249,6 @@
             originalCanvas.addEventListener('mouseleave', onMouseUp); // Stop dragging if mouse leaves the canvas
             originalCanvas.addEventListener('wheel', onMouseWheel);
 
-            // --- BEGIN: AUTO-LOADING THE USER'S UPLOADED FILE FOR DEBUGGING ---
-            if (typeof __files !== 'undefined' && __files['Socket Trays Basement.STL']) {
-                console.log("Found user's STL file, loading it automatically for debugging.");
-                loadingMessage.classList.remove('hidden');
-                
-                const fileBlob = __files['Socket Trays Basement.STL'];
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    loadSTLGeometry(e.target.result);
-                };
-                reader.onerror = (error) => {
-                    console.error("Error reading file:", error);
-                    alert("Error reading file from internal storage.");
-                    loadingMessage.classList.add('hidden');
-                };
-                reader.readAsArrayBuffer(fileBlob);
-            }
-            // --- END: AUTO-LOADING ---
         }
 
         function loadSTLGeometry(data) {
@@ -554,7 +547,15 @@
             depthCamera.bottom = (frustumHeight / -2) - margin;
             
             depthCamera.updateProjectionMatrix();
+            
+            // Update SVG preview when view changes
+            setTimeout(() => updateSVGPreviewAsync(), 100);
         }
+
+        // Store the latest raw depth pixel buffer for use in both canvas and SVG
+        let lastRawDepthPixelBuffer = null;
+        let lastRawDepthWidth = 0;
+        let lastRawDepthHeight = 0;
 
         function animate() {
             requestAnimationFrame(animate);
@@ -582,6 +583,12 @@
             const pixelBuffer = new Uint8Array(4 * WIDTH * HEIGHT);
             renderer.readRenderTargetPixels(depthRenderTarget, 0, 0, WIDTH, HEIGHT, pixelBuffer);
 
+            // Store the raw buffer for SVG and canvas use
+            lastRawDepthPixelBuffer = pixelBuffer.slice();
+            lastRawDepthWidth = WIDTH;
+            lastRawDepthHeight = HEIGHT;
+
+            // Draw the raw (non-transparent) grayscale image to the 2D canvas
             depthCanvas.width = WIDTH;
             depthCanvas.height = HEIGHT;
             
@@ -597,16 +604,13 @@
                 for (let x = 0; x < WIDTH; x++) {
                     const srcIndex = ((HEIGHT - 1 - y) * WIDTH + x) * 4; // Flip Y coordinate
                     const dstIndex = (y * WIDTH + x) * 4;
-                    
                     const r = pixelBuffer[srcIndex];
                     imageData.data[dstIndex + 0] = r;
                     imageData.data[dstIndex + 1] = r;
                     imageData.data[dstIndex + 2] = r;
-                    // If pure black, set alpha to 0 (transparent), else 255 (opaque)
-                    imageData.data[dstIndex + 3] = (r === 0) ? 0 : 255;
+                    imageData.data[dstIndex + 3] = 255; // Always opaque for 2D canvas
                 }
             }
-
             context.putImageData(imageData, 0, 0);
         }
 
@@ -617,12 +621,19 @@
             // camera aspect, and render target size here.
         });
 
-        // Download depth map as PNG
+        // Download depth map as PNG and SVG
         document.addEventListener('DOMContentLoaded', function () {
             const downloadBtn = document.getElementById('downloadDepthBtn');
             if (downloadBtn) {
                 downloadBtn.addEventListener('click', function () {
                     renderHighResDepthMapAndDownload();
+                });
+            }
+            
+            const downloadSvgBtn = document.getElementById('downloadSvgBtn');
+            if (downloadSvgBtn) {
+                downloadSvgBtn.addEventListener('click', function () {
+                    generateAndDownloadSVG();
                 });
             }
         });
@@ -746,6 +757,269 @@
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
             }, 'image/png');
+        }
+
+
+        // Use OpenCV.js to find contours from a pixel buffer
+        function findContoursFromPixelBuffer(pixelBuffer, width, height) {
+            if (!window.cvReady || typeof cv === 'undefined') {
+                throw new Error('OpenCV.js is not loaded yet.');
+            }
+            // Step 1: Create grayscale image from pixel buffer with Y-flip
+            let src = cv.Mat.zeros(height, width, cv.CV_8UC1);
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const srcIndex = ((height - 1 - y) * width + x) * 4; // Y-flip
+                    src.ucharPtr(y, x)[0] = pixelBuffer[srcIndex];
+                }
+            }
+            // Step 2: Threshold to binary (pure black <=2 becomes 255, else 0)
+            let mask = new cv.Mat();
+            cv.threshold(src, mask, 0, 255, cv.THRESH_BINARY);
+            // Step 3: Add 1-pixel border (like cv2.copyMakeBorder)
+            let padded = new cv.Mat();
+            cv.copyMakeBorder(mask, padded, 1, 1, 1, 1, cv.BORDER_CONSTANT, new cv.Scalar(0));
+            // Step 4: Find contours
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(padded, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+            // Convert contours to JS arrays, remove largest contour (outermost boundary)
+            let jsContours = [];
+            for (let i = 0; i < contours.size(); i++) {
+                let cnt = contours.get(i);
+                let arr = [];
+                for (let j = 0; j < cnt.data32S.length; j += 2) {
+                    // Remove border offset
+                    arr.push([cnt.data32S[j] - 1, cnt.data32S[j + 1] - 1]);
+                }
+                jsContours.push(arr);
+                cnt.delete();
+            }
+
+            src.delete();
+            mask.delete();
+            padded.delete();
+            hierarchy.delete();
+            contours.delete();
+            return jsContours;
+        }
+        
+        // Update SVG preview asynchronously (smaller resolution for preview)
+        function updateSVGPreviewAsync() {
+            if (!currentDepthModel || !currentModel) {
+                return;
+            }
+            
+            try {
+                const svgContent = generateSVGContent(500); // Lower resolution for preview
+                updateSVGPreview(svgContent);
+            } catch (error) {
+                console.error('Error generating SVG preview:', error);
+                const svgPreview = document.getElementById('svgPreview');
+                if (svgPreview) {
+                    svgPreview.innerHTML = '<p class="text-red-500">Error generating SVG preview</p>';
+                }
+            }
+        }
+
+        // Generate SVG content with specified resolution
+        function generateSVGContent(maxResolution = 1000) {
+            if (!currentDepthModel || !currentModel) {
+                throw new Error("No model loaded");
+            }
+
+            // Get model dimensions for SVG scaling
+            const box = currentModel.geometry.boundingBox;
+            const size = new THREE.Vector3();
+            box.getSize(size);
+            
+            const orientation = viewSelector.value;
+            let svgWidth, svgHeight;
+
+            if (orientation === 'Top' || orientation === 'Bottom') {
+                svgWidth = size.x;
+                svgHeight = size.z;
+            } else if (orientation === 'Left' || orientation === 'Right') {
+                svgWidth = size.y;
+                svgHeight = size.z;
+            } else if (orientation === 'Front' || orientation === 'Back') {
+                svgWidth = size.x;
+                svgHeight = size.y;
+            }
+
+            // Calculate resolution
+            const aspect = svgWidth / svgHeight;
+            let highResWidth, highResHeight;
+            
+            if (aspect >= 1) {
+                highResWidth = maxResolution;
+                highResHeight = Math.round(maxResolution / aspect);
+            } else {
+                highResHeight = maxResolution;
+                highResWidth = Math.round(maxResolution * aspect);
+            }
+
+            // Create renderer for SVG generation
+            const svgRenderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: true });
+            svgRenderer.setSize(highResWidth, highResHeight);
+            svgRenderer.setPixelRatio(1);
+
+            const svgRenderTarget = new THREE.WebGLRenderTarget(highResWidth, highResHeight, {
+                minFilter: THREE.NearestFilter,
+                magFilter: THREE.NearestFilter,
+                format: THREE.RGBAFormat,
+                type: THREE.UnsignedByteType,
+                stencilBuffer: false
+            });
+
+            // Clone and adjust camera
+            const svgCamera = depthCamera.clone();
+            let frustumWidth, frustumHeight;
+
+            if (orientation === 'Top' || orientation === 'Bottom') {
+                frustumWidth = size.x;
+                frustumHeight = size.z;
+            } else if (orientation === 'Left' || orientation === 'Right') {
+                frustumWidth = size.y;
+                frustumHeight = size.z;
+            } else if (orientation === 'Front' || orientation === 'Back') {
+                frustumWidth = size.x;
+                frustumHeight = size.y;
+            }
+
+            let camAspect = highResWidth / highResHeight;
+            let finalFrustumWidth, finalFrustumHeight;
+
+            if (frustumWidth / frustumHeight > camAspect) {
+                finalFrustumWidth = frustumWidth;
+                finalFrustumHeight = frustumWidth / camAspect;
+            } else {
+                finalFrustumHeight = frustumHeight;
+                finalFrustumWidth = frustumHeight * camAspect;
+            }
+            
+            const centerX = (svgCamera.left + svgCamera.right) / 2;
+            const centerY = (svgCamera.top + svgCamera.bottom) / 2;
+            svgCamera.left = centerX - finalFrustumWidth / 2;
+            svgCamera.right = centerX + finalFrustumWidth / 2;
+            svgCamera.top = centerY + finalFrustumHeight / 2;
+            svgCamera.bottom = centerY - finalFrustumHeight / 2;
+
+            svgCamera.updateProjectionMatrix();
+
+            // Render to target
+            svgRenderer.setRenderTarget(svgRenderTarget);
+            svgRenderer.render(depthScene, svgCamera);
+
+            // Read pixels
+            const pixelBuffer = new Uint8Array(4 * highResWidth * highResHeight);
+            svgRenderer.readRenderTargetPixels(svgRenderTarget, 0, 0, highResWidth, highResHeight, pixelBuffer);
+
+            // Step 1: Find contours using original pixel buffer values (before any transparency)
+            // Following the Python approach: find contours around black holes first
+            const contours = findContoursFromPixelBuffer(pixelBuffer, highResWidth, highResHeight);
+
+            // Step 2: Create canvas with transparency for SVG PNG
+            const canvas = document.createElement('canvas');
+            canvas.width = highResWidth;
+            canvas.height = highResHeight;
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(highResWidth, highResHeight);
+
+            // Process pixels with transparency (black and white become transparent)
+            for (let y = 0; y < highResHeight; y++) {
+                for (let x = 0; x < highResWidth; x++) {
+                    const srcIndex = ((highResHeight - 1 - y) * highResWidth + x) * 4;
+                    const dstIndex = (y * highResWidth + x) * 4;
+                    const r = pixelBuffer[srcIndex];
+                    imageData.data[dstIndex + 0] = r;
+                    imageData.data[dstIndex + 1] = r;
+                    imageData.data[dstIndex + 2] = r;
+                    // Make black (0) and white (255) transparent, gray values opaque
+                    imageData.data[dstIndex + 3] = (r <= 0 || r >= 255) ? 0 : 255;
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+
+            // Convert canvas to base64 PNG
+            const pngDataUrl = canvas.toDataURL('image/png');
+            const base64Data = pngDataUrl.split(',')[1];
+            
+            // Generate SVG path elements from contours
+            const pathElements = [];
+            contours.forEach(contour => {
+                //if (contour.length < 5) return; // Skip very small contours
+
+                const points = contour.map(([x, y]) => {
+                    // Convert pixel coordinates to SVG coordinates
+                    const svgX = (x / highResWidth) * svgWidth;
+                    const svgY = (y / highResHeight) * svgHeight;
+                    return `${svgX},${svgY}`;
+                });
+                
+                if (points.length > 0) {
+                    const pathStr = "M " + points.join(" L ") + " Z";
+                    pathElements.push(`<path d="${pathStr}" stroke="rgb(255,219,102)" fill="none" stroke-width="0.1" />`);
+                }
+            });
+
+            // Generate SVG content
+            const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+     width="${svgWidth}mm" height="${svgHeight}mm" viewBox="0 0 ${svgWidth} ${svgHeight}">
+    <image x="0" y="0" width="${svgWidth}" height="${svgHeight}" 
+           xlink:href="data:image/png;base64,${base64Data}" />
+    ${pathElements.join('\n    ')}
+</svg>`;
+
+            // Cleanup
+            svgRenderer.dispose();
+            
+            return svgContent;
+        }
+
+        // Generate SVG with transparency and contours
+        function generateAndDownloadSVG() {
+            if (!currentDepthModel || !currentModel) {
+                alert("No model loaded.");
+                return;
+            }
+
+            try {
+                const svgContent = generateSVGContent(1000); // High resolution for download
+                
+                // Update preview
+                updateSVGPreview(svgContent);
+
+                // Download SVG
+                const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = lastSTLFilename + '_depthmap.svg';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('Error generating SVG:', error);
+                alert('Error generating SVG: ' + error.message);
+            }
+        }
+
+        // Update SVG preview
+        function updateSVGPreview(svgContent) {
+            const svgPreview = document.getElementById('svgPreview');
+            if (svgPreview) {
+                svgPreview.innerHTML = svgContent;
+                // Scale the SVG to fit the container
+                const svgElement = svgPreview.querySelector('svg');
+                if (svgElement) {
+                    svgElement.style.maxWidth = '100%';
+                    svgElement.style.maxHeight = '100%';
+                    svgElement.style.height = 'auto';
+                }
+            }
         }
 
         window.onload = function () {
