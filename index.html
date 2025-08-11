@@ -758,8 +758,147 @@
             }, 'image/png');
         }
 
-        // Contour finding algorithm - based on Python script approach using cv2.findContours logic
+        // Enhanced contour finding algorithm following Python cv2.findContours approach
         function findContoursFromPixelBuffer(pixelBuffer, width, height) {
+            // Step 1: Create grayscale image from pixel buffer with Y-flip
+            const grayImage = new Uint8Array(width * height);
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const srcIndex = ((height - 1 - y) * width + x) * 4; // Account for Y-flip
+                    const dstIndex = y * width + x;
+                    const r = pixelBuffer[srcIndex];
+                    grayImage[dstIndex] = r;
+                }
+            }
+            
+            // Step 2: Add 1 pixel black padding on all sides (like cv2.copyMakeBorder)
+            const paddedWidth = width + 2;
+            const paddedHeight = height + 2;
+            const paddedImage = new Uint8Array(paddedWidth * paddedHeight);
+            
+            // Fill interior with original image data
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const srcIndex = y * width + x;
+                    const dstIndex = (y + 1) * paddedWidth + (x + 1);
+                    paddedImage[dstIndex] = grayImage[srcIndex];
+                }
+            }
+            // Borders remain 0 (black padding)
+            
+            // Step 3: Create binary mask - pure black pixels (0-2) become 255 (foreground)
+            const binaryMask = new Uint8Array(paddedWidth * paddedHeight);
+            for (let i = 0; i < paddedWidth * paddedHeight; i++) {
+                binaryMask[i] = (paddedImage[i] <= 2) ? 255 : 0;
+            }
+            
+            // Step 4: Find external contours using improved algorithm
+            const contours = [];
+            const visited = new Array(paddedWidth * paddedHeight).fill(false);
+            
+            // 8-direction offsets for Moore neighborhood
+            const directions = [[1,0], [1,1], [0,1], [-1,1], [-1,0], [-1,-1], [0,-1], [1,-1]];
+            
+            // Scan for contour starting points
+            for (let y = 1; y < paddedHeight - 1; y++) {
+                for (let x = 1; x < paddedWidth - 1; x++) {
+                    const idx = y * paddedWidth + x;
+                    
+                    // Skip if already visited or not a foreground pixel
+                    if (visited[idx] || binaryMask[idx] === 0) continue;
+                    
+                    // Check if this is an external contour point (has background neighbor)
+                    let hasBackgroundNeighbor = false;
+                    for (let [dx, dy] of directions) {
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx >= 0 && nx < paddedWidth && ny >= 0 && ny < paddedHeight) {
+                            const nidx = ny * paddedWidth + nx;
+                            if (binaryMask[nidx] === 0) {
+                                hasBackgroundNeighbor = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!hasBackgroundNeighbor) continue;
+                    
+                    // Trace the external contour using border following algorithm
+                    const contour = traceContour(binaryMask, paddedWidth, paddedHeight, x, y, visited);
+                    
+                    // Convert coordinates back to original image space (remove padding offset)
+                    const adjustedContour = contour.map(([px, py]) => [px - 1, py - 1]);
+                    
+                    // Only keep contours with sufficient points
+                    if (adjustedContour.length > 8) {
+                        contours.push(adjustedContour);
+                    }
+                }
+            }
+            
+            return contours;
+        }
+        
+        // Improved contour tracing using border following algorithm
+        function traceContour(binaryMask, width, height, startX, startY, visited) {
+            const contour = [];
+            const directions = [[1,0], [1,1], [0,1], [-1,1], [-1,0], [-1,-1], [0,-1], [1,-1]];
+            
+            let currentX = startX;
+            let currentY = startY;
+            let dirIndex = 0; // Start facing right
+            
+            do {
+                contour.push([currentX, currentY]);
+                visited[currentY * width + currentX] = true;
+                
+                // Find next boundary pixel using 8-connectivity
+                let foundNext = false;
+                for (let i = 0; i < 8; i++) {
+                    const checkDirIndex = (dirIndex + i) % 8;
+                    const [dx, dy] = directions[checkDirIndex];
+                    const nextX = currentX + dx;
+                    const nextY = currentY + dy;
+                    
+                    if (nextX >= 0 && nextX < width && nextY >= 0 && nextY < height) {
+                        const nextIdx = nextY * width + nextX;
+                        if (binaryMask[nextIdx] === 255) {
+                            // Check if this pixel is also on the boundary
+                            let isBoundary = false;
+                            for (let [dx2, dy2] of directions) {
+                                const nnx = nextX + dx2;
+                                const nny = nextY + dy2;
+                                if (nnx >= 0 && nnx < width && nny >= 0 && nny < height) {
+                                    if (binaryMask[nny * width + nnx] === 0) {
+                                        isBoundary = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (isBoundary) {
+                                currentX = nextX;
+                                currentY = nextY;
+                                dirIndex = (checkDirIndex + 6) % 8; // Adjust direction for next search
+                                foundNext = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (!foundNext) break;
+                
+                // Prevent infinite loops
+                if (contour.length > width * height) break;
+                
+            } while (currentX !== startX || currentY !== startY || contour.length < 3);
+            
+            return contour;
+        }
+
+        // Fallback manual contour detection (renamed from original function)
+        function findContoursManual(pixelBuffer, width, height) {
             // Create a binary mask matching Python script: pure black pixels (0) become 255, everything else becomes 0
             // Use original pixel buffer values, not imageData with transparency applied
             const mask = new Uint8Array(width * height);
@@ -1122,14 +1261,20 @@
             const pixelBuffer = new Uint8Array(4 * highResWidth * highResHeight);
             svgRenderer.readRenderTargetPixels(svgRenderTarget, 0, 0, highResWidth, highResHeight, pixelBuffer);
 
-            // Create canvas with transparency
+            // Step 1: Find contours using original pixel buffer values (before any transparency)
+            // Following the Python approach: find contours around black holes first
+            const contours = findContoursFromPixelBuffer(pixelBuffer, highResWidth, highResHeight);
+            
+            // Step 2: Create canvas with proper transparency following Python logic
+            // First make pure black transparent for contour detection
+            // Then make pure white transparent for final output
             const canvas = document.createElement('canvas');
             canvas.width = highResWidth;
             canvas.height = highResHeight;
             const ctx = canvas.getContext('2d');
             const imageData = ctx.createImageData(highResWidth, highResHeight);
 
-            // Process pixels with transparency (black=0 and white=255 become transparent)
+            // Process pixels with transparency (black=0-2 and white=253-255 become transparent)
             for (let y = 0; y < highResHeight; y++) {
                 for (let x = 0; x < highResWidth; x++) {
                     const srcIndex = ((highResHeight - 1 - y) * highResWidth + x) * 4;
@@ -1148,9 +1293,6 @@
             // Convert canvas to base64 PNG
             const pngDataUrl = canvas.toDataURL('image/png');
             const base64Data = pngDataUrl.split(',')[1];
-
-            // Find contours using original pixel buffer values (before transparency)
-            const contours = findContoursFromPixelBuffer(pixelBuffer, highResWidth, highResHeight);
             
             // Generate SVG path elements from contours
             const pathElements = [];
