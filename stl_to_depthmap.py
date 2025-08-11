@@ -337,7 +337,8 @@ def stl_to_depthmap(stl_path, orientation="auto"):
     if getattr(stl_to_depthmap, 'write_png', True):
         png_path = os.path.splitext(stl_path)[0] + ".png"
         img_obj.save(png_path, format="PNG")
-        print(f"PNG saved to {png_path}")
+        if getattr(stl_to_depthmap, 'verbose', False):
+            print(f"PNG saved to {png_path}")
 
     # SVG dimensions in model units (mm)
     svg_width = mesh_dims[0]
