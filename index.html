@@ -4,13 +4,47 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>STL to Depthmap</title>
-    <script src="three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     <!-- Include STLLoader (using the .js version for global THREE object extension) -->
-    <script src="STLLoader.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
     <!-- OpenCV.js for contour detection -->
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="window.cvReady=true;"></script>
     <style>
+        /* Tailwind utility replacements for used classes */
+        .text-3xl { font-size: 1.875rem; line-height: 2.25rem; }
+        .font-bold { font-weight: 700; }
+        .text-gray-800 { color: #1e293b; }
+        .mb-6 { margin-bottom: 1.5rem; }
+        .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+        .font-medium { font-weight: 500; }
+        .text-gray-700 { color: #334155; }
+        .mt-4 { margin-top: 1rem; }
+        .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+        .font-semibold { font-weight: 600; }
+        .mt-4 { margin-top: 1rem; }
+        .flex { display: flex; }
+        .gap-2 { gap: 0.5rem; }
+        .flex-wrap { flex-wrap: wrap; }
+        .justify-center { justify-content: center; }
+        .px-4 { padding-left: 1rem; padding-right: 1rem; }
+        .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+        .bg-blue-600 { background-color: #2563eb; }
+        .bg-green-600 { background-color: #16a34a; }
+        .text-white { color: #fff; }
+        .rounded { border-radius: 0.375rem; }
+        .hover\:bg-blue-700:hover { background-color: #1d4ed8; }
+        .hover\:bg-green-700:hover { background-color: #15803d; }
+        .transition { transition: all 0.2s; }
+        .w-full { width: 100%; }
+        .border { border-width: 1px; border-style: solid; border-color: #d1d5db; }
+        .border-gray-300 { border-color: #d1d5db; }
+        .bg-white { background-color: #fff; }
+        .p-4 { padding: 1rem; }
+        .min-h-\[300px\] { min-height: 300px; }
+        .items-center { align-items: center; }
+        .justify-center { justify-content: center; }
+        .text-gray-500 { color: #6b7280; }
+        /* End Tailwind utility replacements */
         body {
             margin: 0;
             overflow: auto;
@@ -108,7 +142,7 @@
         <input type="file" id="stlFileInput" accept=".stl">
         <div id="loadingMessage" class="loading-message hidden">Loading STL...</div>
 
-        <label for="viewSelector" class="text-lg font-medium text-gray-700 mt-4">Select Depth Map View:</label>
+    <label for="viewSelector" class="text-lg font-medium text-gray-700 mt-4">Select Depth Map View:</label>
         <select id="viewSelector">
             <option value="Front">Front</option>
             <option value="Back">Back</option>
