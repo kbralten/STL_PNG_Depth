@@ -125,7 +125,16 @@
         <div class="canvas-wrapper">
             <h2 class="text-xl font-semibold">Extracted Grayscale Depth Map (Orthographic)</h2>
             <canvas id="depthCanvas"></canvas>
-            <button id="downloadDepthBtn" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">Download Depth Map (PNG)</button>
+            <div class="mt-4 flex gap-2 flex-wrap justify-center">
+                <button id="downloadDepthBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">Download Depth Map (PNG)</button>
+                <button id="downloadSvgBtn" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition">Download SVG</button>
+            </div>
+        </div>
+        <div class="canvas-wrapper">
+            <h2 class="text-xl font-semibold">SVG Preview with Transparency & Contours</h2>
+            <div id="svgPreview" class="w-full border border-gray-300 rounded bg-white p-4 min-h-[300px] flex items-center justify-center">
+                <p class="text-gray-500">SVG preview will appear here after loading a model</p>
+            </div>
         </div>
     </div>
 
@@ -550,6 +559,9 @@
             depthCamera.bottom = (frustumHeight / -2) - margin;
             
             depthCamera.updateProjectionMatrix();
+            
+            // Update SVG preview when view changes
+            setTimeout(() => updateSVGPreviewAsync(), 100);
         }
 
         function animate() {
@@ -608,12 +620,19 @@
             // camera aspect, and render target size here.
         });
 
-        // Download depth map as PNG
+        // Download depth map as PNG and SVG
         document.addEventListener('DOMContentLoaded', function () {
             const downloadBtn = document.getElementById('downloadDepthBtn');
             if (downloadBtn) {
                 downloadBtn.addEventListener('click', function () {
                     renderHighResDepthMapAndDownload();
+                });
+            }
+            
+            const downloadSvgBtn = document.getElementById('downloadSvgBtn');
+            if (downloadSvgBtn) {
+                downloadSvgBtn.addEventListener('click', function () {
+                    generateAndDownloadSVG();
                 });
             }
         });
@@ -737,6 +756,287 @@
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
             }, 'image/png');
+        }
+
+        // Simple contour finding algorithm for JavaScript
+        function findContours(imageData, width, height) {
+            const visited = new Array(width * height).fill(false);
+            const contours = [];
+            
+            // Helper function to check if a pixel is part of an edge
+            function isEdge(x, y) {
+                if (x < 0 || x >= width || y < 0 || y >= height) return false;
+                const idx = (y * width + x) * 4;
+                const alpha = imageData.data[idx + 3];
+                return alpha > 0; // Non-transparent pixel
+            }
+            
+            // Find contours using a simple boundary following algorithm
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = (y * width + x) * 4;
+                    if (visited[y * width + x] || imageData.data[idx + 3] === 0) continue;
+                    
+                    // Check if this is a boundary pixel (has transparent neighbors)
+                    const isBoundary = !isEdge(x-1, y) || !isEdge(x+1, y) || 
+                                      !isEdge(x, y-1) || !isEdge(x, y+1);
+                    
+                    if (isBoundary) {
+                        const contour = [];
+                        const stack = [[x, y]];
+                        
+                        while (stack.length > 0) {
+                            const [cx, cy] = stack.pop();
+                            const cidx = cy * width + cx;
+                            
+                            if (visited[cidx] || cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
+                            if (imageData.data[(cy * width + cx) * 4 + 3] === 0) continue;
+                            
+                            visited[cidx] = true;
+                            contour.push([cx, cy]);
+                            
+                            // Add neighbors
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    if (dx === 0 && dy === 0) continue;
+                                    const nx = cx + dx;
+                                    const ny = cy + dy;
+                                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                                        const nidx = (ny * width + nx) * 4;
+                                        if (imageData.data[nidx + 3] > 0) {
+                                            stack.push([nx, ny]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (contour.length > 10) { // Only keep significant contours
+                            contours.push(contour);
+                        }
+                    }
+                }
+            }
+            
+            return contours;
+        }
+
+        // Update SVG preview asynchronously (smaller resolution for preview)
+        function updateSVGPreviewAsync() {
+            if (!currentDepthModel || !currentModel) {
+                return;
+            }
+            
+            try {
+                const svgContent = generateSVGContent(500); // Lower resolution for preview
+                updateSVGPreview(svgContent);
+            } catch (error) {
+                console.error('Error generating SVG preview:', error);
+                const svgPreview = document.getElementById('svgPreview');
+                if (svgPreview) {
+                    svgPreview.innerHTML = '<p class="text-red-500">Error generating SVG preview</p>';
+                }
+            }
+        }
+
+        // Generate SVG content with specified resolution
+        function generateSVGContent(maxResolution = 1000) {
+            if (!currentDepthModel || !currentModel) {
+                throw new Error("No model loaded");
+            }
+
+            // Get model dimensions for SVG scaling
+            const box = currentModel.geometry.boundingBox;
+            const size = new THREE.Vector3();
+            box.getSize(size);
+            
+            const orientation = viewSelector.value;
+            let svgWidth, svgHeight;
+
+            if (orientation === 'Top' || orientation === 'Bottom') {
+                svgWidth = size.x;
+                svgHeight = size.z;
+            } else if (orientation === 'Left' || orientation === 'Right') {
+                svgWidth = size.y;
+                svgHeight = size.z;
+            } else if (orientation === 'Front' || orientation === 'Back') {
+                svgWidth = size.x;
+                svgHeight = size.y;
+            }
+
+            // Calculate resolution
+            const aspect = svgWidth / svgHeight;
+            let highResWidth, highResHeight;
+            
+            if (aspect >= 1) {
+                highResWidth = maxResolution;
+                highResHeight = Math.round(maxResolution / aspect);
+            } else {
+                highResHeight = maxResolution;
+                highResWidth = Math.round(maxResolution * aspect);
+            }
+
+            // Create renderer for SVG generation
+            const svgRenderer = new THREE.WebGLRenderer({ preserveDrawingBuffer: true });
+            svgRenderer.setSize(highResWidth, highResHeight);
+            svgRenderer.setPixelRatio(1);
+
+            const svgRenderTarget = new THREE.WebGLRenderTarget(highResWidth, highResHeight, {
+                minFilter: THREE.NearestFilter,
+                magFilter: THREE.NearestFilter,
+                format: THREE.RGBAFormat,
+                type: THREE.UnsignedByteType,
+                stencilBuffer: false
+            });
+
+            // Clone and adjust camera
+            const svgCamera = depthCamera.clone();
+            let frustumWidth, frustumHeight;
+
+            if (orientation === 'Top' || orientation === 'Bottom') {
+                frustumWidth = size.x;
+                frustumHeight = size.z;
+            } else if (orientation === 'Left' || orientation === 'Right') {
+                frustumWidth = size.y;
+                frustumHeight = size.z;
+            } else if (orientation === 'Front' || orientation === 'Back') {
+                frustumWidth = size.x;
+                frustumHeight = size.y;
+            }
+
+            let camAspect = highResWidth / highResHeight;
+            let finalFrustumWidth, finalFrustumHeight;
+
+            if (frustumWidth / frustumHeight > camAspect) {
+                finalFrustumWidth = frustumWidth;
+                finalFrustumHeight = frustumWidth / camAspect;
+            } else {
+                finalFrustumHeight = frustumHeight;
+                finalFrustumWidth = frustumHeight * camAspect;
+            }
+            
+            const centerX = (svgCamera.left + svgCamera.right) / 2;
+            const centerY = (svgCamera.top + svgCamera.bottom) / 2;
+            svgCamera.left = centerX - finalFrustumWidth / 2;
+            svgCamera.right = centerX + finalFrustumWidth / 2;
+            svgCamera.top = centerY + finalFrustumHeight / 2;
+            svgCamera.bottom = centerY - finalFrustumHeight / 2;
+
+            svgCamera.updateProjectionMatrix();
+
+            // Render to target
+            svgRenderer.setRenderTarget(svgRenderTarget);
+            svgRenderer.render(depthScene, svgCamera);
+
+            // Read pixels
+            const pixelBuffer = new Uint8Array(4 * highResWidth * highResHeight);
+            svgRenderer.readRenderTargetPixels(svgRenderTarget, 0, 0, highResWidth, highResHeight, pixelBuffer);
+
+            // Create canvas with transparency
+            const canvas = document.createElement('canvas');
+            canvas.width = highResWidth;
+            canvas.height = highResHeight;
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(highResWidth, highResHeight);
+
+            // Process pixels with transparency (black=0 and white=255 become transparent)
+            for (let y = 0; y < highResHeight; y++) {
+                for (let x = 0; x < highResWidth; x++) {
+                    const srcIndex = ((highResHeight - 1 - y) * highResWidth + x) * 4;
+                    const dstIndex = (y * highResWidth + x) * 4;
+                    
+                    const r = pixelBuffer[srcIndex];
+                    imageData.data[dstIndex + 0] = r;
+                    imageData.data[dstIndex + 1] = r;
+                    imageData.data[dstIndex + 2] = r;
+                    // Make black (0) and white (255) transparent, gray values opaque
+                    imageData.data[dstIndex + 3] = (r > 0 && r < 255) ? 255 : 0;
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+
+            // Convert canvas to base64 PNG
+            const pngDataUrl = canvas.toDataURL('image/png');
+            const base64Data = pngDataUrl.split(',')[1];
+
+            // Find contours
+            const contours = findContours(imageData, highResWidth, highResHeight);
+            
+            // Generate SVG path elements from contours
+            const pathElements = [];
+            contours.forEach(contour => {
+                if (contour.length < 5) return; // Skip very small contours
+                
+                const points = contour.map(([x, y]) => {
+                    // Convert pixel coordinates to SVG coordinates
+                    const svgX = (x / highResWidth) * svgWidth;
+                    const svgY = (y / highResHeight) * svgHeight;
+                    return `${svgX},${svgY}`;
+                });
+                
+                if (points.length > 0) {
+                    const pathStr = "M " + points.join(" L ") + " Z";
+                    pathElements.push(`<path d="${pathStr}" stroke="rgb(255,219,102)" fill="none" stroke-width="0.1" />`);
+                }
+            });
+
+            // Generate SVG content
+            const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+     width="${svgWidth}mm" height="${svgHeight}mm" viewBox="0 0 ${svgWidth} ${svgHeight}">
+    <image x="0" y="0" width="${svgWidth}" height="${svgHeight}" 
+           xlink:href="data:image/png;base64,${base64Data}" />
+    ${pathElements.join('\n    ')}
+</svg>`;
+
+            // Cleanup
+            svgRenderer.dispose();
+            
+            return svgContent;
+        }
+
+        // Generate SVG with transparency and contours
+        function generateAndDownloadSVG() {
+            if (!currentDepthModel || !currentModel) {
+                alert("No model loaded.");
+                return;
+            }
+
+            try {
+                const svgContent = generateSVGContent(1000); // High resolution for download
+                
+                // Update preview
+                updateSVGPreview(svgContent);
+
+                // Download SVG
+                const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = lastSTLFilename + '_depthmap.svg';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('Error generating SVG:', error);
+                alert('Error generating SVG: ' + error.message);
+            }
+        }
+
+        // Update SVG preview
+        function updateSVGPreview(svgContent) {
+            const svgPreview = document.getElementById('svgPreview');
+            if (svgPreview) {
+                svgPreview.innerHTML = svgContent;
+                // Scale the SVG to fit the container
+                const svgElement = svgPreview.querySelector('svg');
+                if (svgElement) {
+                    svgElement.style.maxWidth = '100%';
+                    svgElement.style.maxHeight = '100%';
+                    svgElement.style.height = 'auto';
+                }
+            }
         }
 
         window.onload = function () {
