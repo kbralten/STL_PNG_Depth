@@ -583,13 +583,19 @@
             const context = depthCanvas.getContext('2d');
             const imageData = context.createImageData(WIDTH, HEIGHT);
 
-            for (let i = 0; i < pixelBuffer.length / 4; i++) {
-                const r = pixelBuffer[i * 4 + 0];
-                imageData.data[i * 4 + 0] = r;
-                imageData.data[i * 4 + 1] = r;
-                imageData.data[i * 4 + 2] = r;
-                // If pure black, set alpha to 0 (transparent), else 255 (opaque)
-                imageData.data[i * 4 + 3] = (r === 0) ? 0 : 255;
+            // Flip the image vertically: WebGL reads pixels with Y=0 at bottom, canvas expects Y=0 at top
+            for (let y = 0; y < HEIGHT; y++) {
+                for (let x = 0; x < WIDTH; x++) {
+                    const srcIndex = ((HEIGHT - 1 - y) * WIDTH + x) * 4; // Flip Y coordinate
+                    const dstIndex = (y * WIDTH + x) * 4;
+                    
+                    const r = pixelBuffer[srcIndex];
+                    imageData.data[dstIndex + 0] = r;
+                    imageData.data[dstIndex + 1] = r;
+                    imageData.data[dstIndex + 2] = r;
+                    // If pure black, set alpha to 0 (transparent), else 255 (opaque)
+                    imageData.data[dstIndex + 3] = (r === 0) ? 0 : 255;
+                }
             }
 
             context.putImageData(imageData, 0, 0);
@@ -704,13 +710,19 @@
             const ctx = offCanvas.getContext('2d');
             const imageData = ctx.createImageData(highResWidth, highResHeight);
 
-            for (let i = 0; i < pixelBuffer.length / 4; i++) {
-                const r = pixelBuffer[i * 4 + 0];
-                imageData.data[i * 4 + 0] = r;
-                imageData.data[i * 4 + 1] = r;
-                imageData.data[i * 4 + 2] = r;
-                // If pure black, set alpha to 0 (transparent), else 255 (opaque)
-                imageData.data[i * 4 + 3] = (r === 0) ? 0 : 255;
+            // Flip the image vertically: WebGL reads pixels with Y=0 at bottom, canvas expects Y=0 at top
+            for (let y = 0; y < highResHeight; y++) {
+                for (let x = 0; x < highResWidth; x++) {
+                    const srcIndex = ((highResHeight - 1 - y) * highResWidth + x) * 4; // Flip Y coordinate
+                    const dstIndex = (y * highResWidth + x) * 4;
+                    
+                    const r = pixelBuffer[srcIndex];
+                    imageData.data[dstIndex + 0] = r;
+                    imageData.data[dstIndex + 1] = r;
+                    imageData.data[dstIndex + 2] = r;
+                    // If pure black, set alpha to 0 (transparent), else 255 (opaque)
+                    imageData.data[dstIndex + 3] = (r === 0) ? 0 : 255;
+                }
             }
             ctx.putImageData(imageData, 0, 0);
 
