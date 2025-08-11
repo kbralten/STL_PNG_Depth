@@ -11,23 +11,117 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
+def analyze_svg_paths(svg_content):
+    """Analyze all SVG paths in the content"""
+    
+    # Find all path elements
+    path_pattern = r'<path[^>]*\bd=["\']([^"\']*)["\'][^>]*>'
+    path_matches = re.findall(path_pattern, svg_content, re.IGNORECASE)
+    
+    # Also find paths without quotes around d attribute
+    path_pattern_alt = r'<path[^>]*\bd=([^\s>]+)[^>]*>'
+    path_matches_alt = re.findall(path_pattern_alt, svg_content, re.IGNORECASE)
+    
+    all_paths = path_matches + path_matches_alt
+    
+    print(f"\nSVG Path Analysis:")
+    print(f"Found {len(all_paths)} path elements")
+    
+    if not all_paths:
+        return
+    
+    print("=" * 40)
+    
+    # Analyze path commands
+    command_counts = {}
+    total_coordinates = 0
+    x_coords = []
+    y_coords = []
+    
+    for i, path_data in enumerate(all_paths, 1):
+        print(f"\nPath {i}:")
+        print(f"  Data length: {len(path_data)} characters")
+        
+        # Extract commands (letters)
+        commands = re.findall(r'[MmLlHhVvCcSsQqTtAaZz]', path_data)
+        print(f"  Commands: {len(commands)} total")
+        
+        # Count each command type
+        path_commands = {}
+        for cmd in commands:
+            cmd_upper = cmd.upper()
+            path_commands[cmd_upper] = path_commands.get(cmd_upper, 0) + 1
+            command_counts[cmd_upper] = command_counts.get(cmd_upper, 0) + 1
+        
+        if path_commands:
+            cmd_summary = ', '.join([f"{cmd}:{count}" for cmd, count in sorted(path_commands.items())])
+            print(f"  Command breakdown: {cmd_summary}")
+        
+        # Extract numeric coordinates
+        coord_pattern = r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?'
+        coordinates = re.findall(coord_pattern, path_data)
+        
+        if coordinates:
+            coords = [float(c) for c in coordinates]
+            print(f"  Coordinates: {len(coords)} numbers")
+            
+            # Assuming pairs of x,y coordinates for most commands
+            if len(coords) >= 2:
+                x_vals = coords[::2]  # Even indices
+                y_vals = coords[1::2]  # Odd indices
+                
+                if x_vals and y_vals:
+                    print(f"  X range: {min(x_vals):.2f} to {max(x_vals):.2f}")
+                    print(f"  Y range: {min(y_vals):.2f} to {max(y_vals):.2f}")
+                    
+                    x_coords.extend(x_vals)
+                    y_coords.extend(y_vals)
+            
+            total_coordinates += len(coords)
+    
+    # Overall statistics
+    print(f"\nOverall Path Statistics:")
+    print(f"  Total paths: {len(all_paths)}")
+    print(f"  Total coordinates: {total_coordinates}")
+    
+    if command_counts:
+        print(f"  Command summary:")
+        for cmd, count in sorted(command_counts.items()):
+            cmd_name = {
+                'M': 'MoveTo', 'L': 'LineTo', 'H': 'HorizontalLineTo', 'V': 'VerticalLineTo',
+                'C': 'CurveTo', 'S': 'SmoothCurveTo', 'Q': 'QuadraticCurveTo', 'T': 'SmoothQuadraticCurveTo',
+                'A': 'EllipticalArc', 'Z': 'ClosePath'
+            }.get(cmd, cmd)
+            print(f"    {cmd} ({cmd_name}): {count}")
+    
+    if x_coords and y_coords:
+        print(f"  Overall coordinate ranges:")
+        print(f"    X: {min(x_coords):.2f} to {max(x_coords):.2f}")
+        print(f"    Y: {min(y_coords):.2f} to {max(y_coords):.2f}")
+
 def analyze_svg_images(svg_path):
     """Analyze all embedded PNG images in an SVG file"""
     
     with open(svg_path, 'r') as f:
         svg_content = f.read()
     
+    print(f"SVG Analysis: {svg_path}")
+    print("=" * 60)
+    
+    # Analyze SVG paths first
+    analyze_svg_paths(svg_content)
+    
     # Find all base64 encoded PNG images
     png_pattern = r'data:image/png;base64,([A-Za-z0-9+/=]+)'
     matches = re.findall(png_pattern, svg_content)
     
     if not matches:
-        print(f"No embedded PNG images found in {svg_path}")
+        print(f"\nNo embedded PNG images found in {svg_path}")
         return
     
-    print(f"SVG Analysis: {svg_path}")
+    print(f"\nPNG Image Analysis:")
     print(f"Found {len(matches)} embedded PNG images")
-    print("=" * 60)
+    print("=" * 40)
     
     for i, base64_data in enumerate(matches, 1):
         print(f"\nImage {i}:")
