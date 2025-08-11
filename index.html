@@ -11,13 +11,13 @@
     <style>
         body {
             margin: 0;
-            overflow: hidden;
+            overflow: auto;
             font-family: 'Inter', sans-serif;
             background-color: #f0f2f5;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: flex-start;
             min-height: 100vh;
             padding: 1rem;
         }
@@ -758,62 +758,95 @@
             }, 'image/png');
         }
 
-        // Simple contour finding algorithm for JavaScript
+        // Simple contour finding algorithm for JavaScript - based on Python script approach
         function findContours(imageData, width, height) {
-            const visited = new Array(width * height).fill(false);
-            const contours = [];
-            
-            // Helper function to check if a pixel is part of an edge
-            function isEdge(x, y) {
-                if (x < 0 || x >= width || y < 0 || y >= height) return false;
-                const idx = (y * width + x) * 4;
-                const alpha = imageData.data[idx + 3];
-                return alpha > 0; // Non-transparent pixel
+            // Create a binary mask where opaque pixels are 255 and transparent pixels are 0
+            const mask = new Uint8Array(width * height);
+            for (let i = 0; i < width * height; i++) {
+                const alpha = imageData.data[i * 4 + 3];
+                mask[i] = alpha > 0 ? 255 : 0;
             }
             
-            // Find contours using a simple boundary following algorithm
-            for (let y = 1; y < height - 1; y++) {
-                for (let x = 1; x < width - 1; x++) {
-                    const idx = (y * width + x) * 4;
-                    if (visited[y * width + x] || imageData.data[idx + 3] === 0) continue;
+            // Pad the mask with a 1-pixel border of zeros (transparent)
+            const paddedWidth = width + 2;
+            const paddedHeight = height + 2;
+            const paddedMask = new Uint8Array(paddedWidth * paddedHeight);
+            
+            // Fill padded mask
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const srcIdx = y * width + x;
+                    const dstIdx = (y + 1) * paddedWidth + (x + 1);
+                    paddedMask[dstIdx] = mask[srcIdx];
+                }
+            }
+            
+            // Find contours by looking for transitions from 0 to 255
+            const contours = [];
+            const visited = new Array(paddedWidth * paddedHeight).fill(false);
+            
+            for (let y = 1; y < paddedHeight - 1; y++) {
+                for (let x = 1; x < paddedWidth - 1; x++) {
+                    const idx = y * paddedWidth + x;
                     
-                    // Check if this is a boundary pixel (has transparent neighbors)
-                    const isBoundary = !isEdge(x-1, y) || !isEdge(x+1, y) || 
-                                      !isEdge(x, y-1) || !isEdge(x, y+1);
+                    // Skip if already visited or if this is a background pixel
+                    if (visited[idx] || paddedMask[idx] === 0) continue;
                     
-                    if (isBoundary) {
-                        const contour = [];
-                        const stack = [[x, y]];
+                    // Check if this is a boundary pixel (has at least one transparent neighbor)
+                    const hasTransparentNeighbor = 
+                        paddedMask[idx - 1] === 0 ||           // left
+                        paddedMask[idx + 1] === 0 ||           // right  
+                        paddedMask[idx - paddedWidth] === 0 || // up
+                        paddedMask[idx + paddedWidth] === 0;   // down
+                    
+                    if (!hasTransparentNeighbor) continue;
+                    
+                    // Trace the boundary
+                    const contour = [];
+                    const toVisit = [[x, y]];
+                    
+                    while (toVisit.length > 0) {
+                        const [cx, cy] = toVisit.pop();
+                        const cidx = cy * paddedWidth + cx;
                         
-                        while (stack.length > 0) {
-                            const [cx, cy] = stack.pop();
-                            const cidx = cy * width + cx;
-                            
-                            if (visited[cidx] || cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
-                            if (imageData.data[(cy * width + cx) * 4 + 3] === 0) continue;
-                            
-                            visited[cidx] = true;
-                            contour.push([cx, cy]);
-                            
-                            // Add neighbors
-                            for (let dy = -1; dy <= 1; dy++) {
-                                for (let dx = -1; dx <= 1; dx++) {
-                                    if (dx === 0 && dy === 0) continue;
-                                    const nx = cx + dx;
-                                    const ny = cy + dy;
-                                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                                        const nidx = (ny * width + nx) * 4;
-                                        if (imageData.data[nidx + 3] > 0) {
-                                            stack.push([nx, ny]);
-                                        }
+                        if (visited[cidx] || cx < 1 || cx >= paddedWidth - 1 || 
+                            cy < 1 || cy >= paddedHeight - 1 || paddedMask[cidx] === 0) {
+                            continue;
+                        }
+                        
+                        visited[cidx] = true;
+                        
+                        // Check if this pixel is on the boundary  
+                        const isBoundary = 
+                            paddedMask[cidx - 1] === 0 ||           // left
+                            paddedMask[cidx + 1] === 0 ||           // right
+                            paddedMask[cidx - paddedWidth] === 0 || // up  
+                            paddedMask[cidx + paddedWidth] === 0;   // down
+                        
+                        if (isBoundary) {
+                            // Convert back to original coordinates (remove padding offset)
+                            contour.push([cx - 1, cy - 1]);
+                        }
+                        
+                        // Add 8-connected neighbors
+                        for (let dy = -1; dy <= 1; dy++) {
+                            for (let dx = -1; dx <= 1; dx++) {
+                                if (dx === 0 && dy === 0) continue;
+                                const nx = cx + dx;
+                                const ny = cy + dy;
+                                if (nx >= 1 && nx < paddedWidth - 1 && ny >= 1 && ny < paddedHeight - 1) {
+                                    const nidx = ny * paddedWidth + nx;
+                                    if (!visited[nidx] && paddedMask[nidx] === 255) {
+                                        toVisit.push([nx, ny]);
                                     }
                                 }
                             }
                         }
-                        
-                        if (contour.length > 10) { // Only keep significant contours
-                            contours.push(contour);
-                        }
+                    }
+                    
+                    // Only keep contours with significant number of points
+                    if (contour.length > 5) {
+                        contours.push(contour);
                     }
                 }
             }
@@ -950,7 +983,7 @@
                     imageData.data[dstIndex + 1] = r;
                     imageData.data[dstIndex + 2] = r;
                     // Make black (0) and white (255) transparent, gray values opaque
-                    imageData.data[dstIndex + 3] = (r > 0 && r < 255) ? 255 : 0;
+                    imageData.data[dstIndex + 3] = (r === 0 || r === 255) ? 0 : 255;
                 }
             }
             ctx.putImageData(imageData, 0, 0);
