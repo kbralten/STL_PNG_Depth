@@ -47,11 +47,11 @@
         }
         canvas {
             border-radius: 0.5rem;
-            width: 100%;
-            height: auto;
-            max-height: 400px; /* Limit height for better viewing */
+            max-width: 100%;
+            max-height: 400px;
             display: block;
             cursor: grab;
+            object-fit: contain; /* Preserve aspect ratio */
         }
         canvas:active {
             cursor: grabbing;
@@ -169,6 +169,10 @@
             renderer.setSize(WIDTH, HEIGHT);
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.shadowMap.enabled = true; 
+
+            // Set canvas display size to maintain aspect ratio
+            originalCanvas.style.width = WIDTH + 'px';
+            originalCanvas.style.height = HEIGHT + 'px';
 
             // Add some lights
             const ambientLight = new THREE.AmbientLight(0x404040, 0.6); 
@@ -580,6 +584,11 @@
 
             depthCanvas.width = WIDTH;
             depthCanvas.height = HEIGHT;
+            
+            // Set canvas display size to maintain aspect ratio
+            depthCanvas.style.width = WIDTH + 'px';
+            depthCanvas.style.height = HEIGHT + 'px';
+            
             const context = depthCanvas.getContext('2d');
             const imageData = context.createImageData(WIDTH, HEIGHT);
 
