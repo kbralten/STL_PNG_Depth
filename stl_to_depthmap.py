@@ -464,8 +464,8 @@ def stl_to_depthmap(stl_path, orientation="auto"):
         del depth_img
     gc.collect()
 
-def stl_to_depthmap_sliced(stl_path, slice_height, orientation="auto"):
-    """Create multiple depth map slices from an STL file"""
+def stl_to_depthmap_sliced(stl_path, slice_height, orientation="auto", top_slice_depth=None):
+    """Create multiple depth map slices from an STL file, with optional top slice depth."""
     import gc
     
     # Load STL mesh (same as original function)
@@ -505,12 +505,70 @@ def stl_to_depthmap_sliced(stl_path, slice_height, orientation="auto"):
     rem = mesh_height % slice_height
     num_full = int(mesh_height // slice_height)
     num_slices = num_full + (1 if rem > 0 else 0)
-    if getattr(stl_to_depthmap, 'verbose', False):
+    # --- New: Build slice bounds with optional top_slice_depth ---
+    slice_bounds = []
+    if top_slice_depth is not None and top_slice_depth > 0 and top_slice_depth < mesh_height:
+        # Top slice: [mesh_height - top_slice_depth, mesh_height]
+        top_start = mesh_height - top_slice_depth
+        top_end = mesh_height
+        slice_bounds.append((top_start, top_end))
+        # Remaining slices: work downward from top_start
+        remaining_height = top_start
+        while remaining_height > 0:
+            next_start = max(0, remaining_height - slice_height)
+            slice_bounds.append((next_start, remaining_height))
+            remaining_height = next_start
+    else:
+        # Default behavior (bottom-up)
         if rem > 0:
-            print(f"Creating {num_slices} slices: 1 of {rem:.1f}mm, {num_full} of {slice_height}mm each")
+            # First slice is the small one at the bottom
+            slice_bounds.append((0, rem))
+            for i in range(num_full):
+                start = rem + i * slice_height
+                end = min(rem + (i + 1) * slice_height, mesh_height)
+                slice_bounds.append((start, end))
         else:
-            print(f"Creating {num_slices} slices of {slice_height}mm each")
+            for i in range(num_full):
+                start = i * slice_height
+                end = min((i + 1) * slice_height, mesh_height)
+                slice_bounds.append((start, end))
+        # Reverse to make slices from top to bottom for consistency
+        slice_bounds = [(mesh_height - end, mesh_height - start) for (start, end) in slice_bounds][::-1]
 
+    if getattr(stl_to_depthmap, 'verbose', False):
+        # Build a readable summary from the actual slice_bounds (top-to-bottom)
+        try:
+            sizes = [round(end - start, 6) for (start, end) in slice_bounds]
+        except Exception:
+            sizes = []
+        if sizes:
+            # Group consecutive equal sizes for compact output
+            grouped = []
+            current = sizes[0]
+            count = 1
+            for s in sizes[1:]:
+                if abs(s - current) < 1e-6:
+                    count += 1
+                else:
+                    grouped.append((count, current))
+                    current = s
+                    count = 1
+            grouped.append((count, current))
+
+            parts = []
+            for cnt, sz in grouped:
+                if cnt == 1:
+                    parts.append(f"1 of {sz:.1f}mm")
+                else:
+                    parts.append(f"{cnt} of {sz:.1f}mm each")
+
+            print(f"Creating {len(sizes)} slices: " + ", ".join(parts))
+        else:
+            # Fallback to previous message if slice_bounds not available
+            if rem > 0:
+                print(f"Creating {num_slices} slices: 1 of {rem:.1f}mm, {num_full} of {slice_height}mm each")
+            else:
+                print(f"Creating {num_slices} slices of {slice_height}mm each")
     # Step 1: Generate full contour on complete model first
     if getattr(stl_to_depthmap, 'verbose', False):
         print("Generating overall contours from full model...")
@@ -520,26 +578,16 @@ def stl_to_depthmap_sliced(stl_path, slice_height, orientation="auto"):
     slice_data = []
     base_filename = os.path.splitext(stl_path)[0]
 
-    slice_bounds = []
-    if rem > 0:
-        # First slice is the small one at the bottom
-        slice_bounds.append((0, rem))
-        for i in range(num_full):
-            start = rem + i * slice_height
-            end = min(rem + (i + 1) * slice_height, mesh_height)
-            slice_bounds.append((start, end))
-    else:
-        for i in range(num_full):
-            start = i * slice_height
-            end = min((i + 1) * slice_height, mesh_height)
-            slice_bounds.append((start, end))
-
     for slice_idx, (slice_start, slice_end) in enumerate(slice_bounds):
+        # --- New: Determine if this is the top slice and pass its depth for shading ---
+        is_top_slice = (slice_idx == 0 and top_slice_depth is not None and top_slice_depth > 0 and top_slice_depth < mesh_height)
+        custom_depth = (slice_end - slice_start) if is_top_slice else None
+
         if getattr(stl_to_depthmap, 'verbose', False):
             print(f"\nSlice {slice_idx + 1} ({slice_start:.1f}mm to {slice_end:.1f}mm):")
 
-        # Generate depth image for this slice
-        slice_depth_img = generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_info)
+        # Generate depth image for this slice, pass custom_depth for top slice
+        slice_depth_img = generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_info, custom_depth=custom_depth)
 
         # Count non-transparent pixels and get value range
         non_transparent = (slice_depth_img > 0) & (slice_depth_img < 255)  # Gradients within slice
@@ -692,8 +740,10 @@ def generate_depth_image(mesh):
     
     return depth_img, contours, mesh_info
 
-def generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_info):
-    """Generate depth image for a specific slice using parallel processing"""
+def generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_info, custom_depth=None):
+    """Generate depth image for a specific slice using parallel processing.
+    If custom_depth is set, use it for shading range instead of (slice_end - slice_start).
+    """
     from scipy import ndimage
     
     # Extract mesh info
@@ -766,8 +816,12 @@ def generate_slice_depth_image(mesh, slice_start, slice_end, mesh_height, mesh_i
         # Handle pixels within slice range - show as gradients
         if np.any(within_slice_mask):
             valid_depths = depth_np[within_slice_mask]
-            # Normalize depths within slice range: slice_start=black(1), slice_end=light_gray(254)
-            depth_norm = (valid_depths - slice_start) / (slice_end - slice_start + 1e-8)
+            # --- New: Use custom_depth for shading if provided ---
+            if custom_depth is not None and custom_depth > 0:
+                # Map slice_start=black(1), slice_end=white(254) over custom_depth
+                depth_norm = (valid_depths - slice_start) / (custom_depth + 1e-8)
+            else:
+                depth_norm = (valid_depths - slice_start) / (slice_end - slice_start + 1e-8)
             depth_norm = np.clip(depth_norm, 0, 1)
             # Map to 1-254 range (avoiding pure black 0 and pure white 255)
             depth_img[within_slice_mask] = (depth_norm * 253 + 1).astype(np.uint8)
@@ -934,6 +988,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert STL to depthmap SVG")
     parser.add_argument("stl_path", help="Input STL file")
     parser.add_argument("--slice-height", type=float, help="Height of each slice in mm (enables slicing mode)")
+    parser.add_argument("--top-slice-depth", type=float, help="Depth of the topmost slice in mm (optional, only with --slice-height)")
     parser.add_argument("--only-png", action="store_true", help="Only write PNG, not SVG")
     parser.add_argument("--only-svg", action="store_true", help="Only write SVG, not PNG")
     parser.add_argument("--svg-contours", action="store_true", help="Write SVG file with only contours for each island")
@@ -954,7 +1009,7 @@ if __name__ == "__main__":
     try:
         if args.slice_height:
             # Slicing mode enabled
-            stl_to_depthmap_sliced(args.stl_path, slice_height=args.slice_height, orientation=args.orientation)
+            stl_to_depthmap_sliced(args.stl_path, slice_height=args.slice_height, orientation=args.orientation, top_slice_depth=args.top_slice_depth)
         else:
             # Regular single depth map mode
             stl_to_depthmap(args.stl_path, orientation=args.orientation)
@@ -965,5 +1020,11 @@ if __name__ == "__main__":
         # Force cleanup to prevent segmentation fault
         gc.collect()
         if args.verbose:
-            print("Conversion completed successfully.")
+            print("Conversion completed successfully")
+        if args.slice_height:
+            # Slicing mode enabled
+            stl_to_depthmap_sliced(args.stl_path, slice_height=args.slice_height, orientation=args.orientation, top_slice_depth=args.top_slice_depth)
+        else:
+            # Regular single depth map mode
+            stl_to_depthmap(args.stl_path, orientation=args.orientation)
 
