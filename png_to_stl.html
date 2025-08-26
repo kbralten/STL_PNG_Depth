@@ -49,11 +49,22 @@
         .preview{background:var(--panel);padding:.5rem;border-radius:.5rem;min-height:400px;position:relative}
     /* screen-reader only text */
     .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+    /* Tabs */
+    .tab-link{color:var(--muted);padding:.5rem .75rem;border-radius:.375rem;text-decoration:none;background:transparent}
+    .tab-link.active{background:rgba(255,255,255,0.04);color:#fff;box-shadow:0 6px 12px rgba(0,0,0,0.4)}
+    /* Ensure tabs remain clickable above other content */
+    .top-tabs{position:sticky;top:0;display:flex;justify-content:center;padding-top:1rem;padding-bottom:.5rem;z-index:10000}
+    .top-tabs .tab-link{position:relative;z-index:10001}
         @media(min-width:768px){.preview{min-height:600px}}
         #preview-canvas{width:100%;height:100%;display:block;border-radius:.5rem}
-        #placeholder-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.05rem}
-        #spinner{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(31,41,55,0.75);border-radius:.5rem}
-        #spinner.hidden{display:none}
+    #placeholder-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.05rem;pointer-events:none}
+    #spinner{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(31,41,55,0.75);border-radius:.5rem}
+    #spinner.hidden{display:none}
+    /* Restrict spinner SVG size and provide a CSS spin animation (no Tailwind needed) */
+    #spinner svg { width:48px; height:48px; display:block; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin 1s linear infinite; }
 
         /* Simple utility classes used in the markup to avoid touching structure */
         .text-center{text-align:center}
@@ -67,6 +78,17 @@
         .items-end{align-items:flex-end}
         .mt-4{margin-top:1rem}
         .pt-4{padding-top:1rem}
+    </style>
+    <style>
+        /* Ensure interactive controls remain clickable even if something else added a high-z overlay
+           We explicitly enable pointer-events on common interactive elements and keep tab links clickable. */
+        button, input, label, select, textarea, .file-input-label, .download-btn, .tab-link {
+            pointer-events: auto !important;
+        }
+        /* Make sure tabs show pointer cursor */
+        .tab-link { cursor: pointer !important; }
+        /* Prevent the spinner overlay from permanently blocking clicks when hidden */
+        #spinner { pointer-events: none; }
     </style>
     <!-- Google Fonts for a modern look -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -112,6 +134,12 @@
 
     <div class="container mx-auto p-4 md:p-8">
         <header class="text-center mb-8">
+            <div class="top-tabs">
+                <nav style="display:flex;justify-content:center;gap:1rem;margin-bottom:0;">
+                    <a href="index.html" class="tab-link" id="tab-index" onclick="location.href='index.html';return false;">STL → Depthmap</a>
+                    <a href="png_to_stl.html" class="tab-link active" id="tab-png" onclick="location.href='png_to_stl.html';return false;">Depthmap → STL</a>
+                </nav>
+            </div>
             <h1 class="text-4xl md:text-5xl font-bold text-white">Depth Map to 3D Model</h1>
             <p class="text-gray-400 mt-2">Upload a black & white depth map to generate a 3D model and export it as an STL file.</p>
         </header>
@@ -482,6 +510,32 @@
 
         init();
 
+    </script>
+    <script>
+        // Highlight active tab based on current page
+        (function(){
+            try{
+                const path = location.pathname.split('/').pop();
+                document.querySelectorAll('.tab-link').forEach(a=>a.classList.remove('active'));
+                if (!path || path === '' || path === 'index.html') document.getElementById('tab-index')?.classList.add('active');
+                else if (path === 'png_to_stl.html') document.getElementById('tab-png')?.classList.add('active');
+            }catch(e){/* ignore */}
+        })();
+
+        // Ensure tab links are clickable even if some overlay is present
+        (function(){
+            try{
+                document.querySelectorAll('.tab-link').forEach(a=>{
+                    a.style.position = 'relative';
+                    a.style.zIndex = '9999';
+                    a.addEventListener('click', function(e){
+                        e.preventDefault();
+                        const href = this.getAttribute('href');
+                        if (href) location.href = href;
+                    });
+                });
+            }catch(e){/* ignore */}
+        })();
     </script>
 </body>
 </html>

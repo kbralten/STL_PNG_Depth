@@ -9,169 +9,146 @@
     <!-- OpenCV.js for contour detection -->
     <script async src="https://docs.opencv.org/4.x/opencv.js" onload="window.cvReady=true;"></script>
     <style>
-        /* Tailwind utility replacements for used classes */
-        .text-3xl { font-size: 1.875rem; line-height: 2.25rem; }
-        .font-bold { font-weight: 700; }
-        .text-gray-800 { color: #1e293b; }
-        .mb-6 { margin-bottom: 1.5rem; }
-        .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
-        .font-medium { font-weight: 500; }
-        .text-gray-700 { color: #334155; }
-        .mt-4 { margin-top: 1rem; }
-        .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
-        .font-semibold { font-weight: 600; }
-        .mt-4 { margin-top: 1rem; }
-        .flex { display: flex; }
-        .gap-2 { gap: 0.5rem; }
-        .flex-wrap { flex-wrap: wrap; }
-        .justify-center { justify-content: center; }
-        .px-4 { padding-left: 1rem; padding-right: 1rem; }
-        .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-        .bg-blue-600 { background-color: #2563eb; }
-        .bg-green-600 { background-color: #16a34a; }
-        .text-white { color: #fff; }
-        .rounded { border-radius: 0.375rem; }
-        .hover\:bg-blue-700:hover { background-color: #1d4ed8; }
-        .hover\:bg-green-700:hover { background-color: #15803d; }
-        .transition { transition: all 0.2s; }
-        .w-full { width: 100%; }
-        .border { border-width: 1px; border-style: solid; border-color: #d1d5db; }
-        .border-gray-300 { border-color: #d1d5db; }
-        .bg-white { background-color: #fff; }
-        .p-4 { padding: 1rem; }
-        .min-h-\[300px\] { min-height: 300px; }
-        .items-center { align-items: center; }
-        .justify-center { justify-content: center; }
-        .text-gray-500 { color: #6b7280; }
-        /* End Tailwind utility replacements */
-        body {
-            margin: 0;
-            overflow: auto;
-            font-family: 'Inter', sans-serif;
-            background-color: #f0f2f5;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: flex-start;
-            min-height: 100vh;
-            padding: 1rem;
+        :root{
+            --bg: #111827; /* gray-900 */
+            --panel: #1f2937; /* gray-800 */
+            --muted: #9ca3af; /* gray-400 */
+            --accent: #6366f1; /* indigo-500 */
+            --accent-hover: #4f46e5; /* indigo-600 */
+            --green: #16a34a; /* green-600 */
+            --green-hover: #15803d; /* green-700 */
+            --card-shadow: 0 10px 15px rgba(0,0,0,0.4);
+            font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial;
         }
-        .container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 1rem;
-            justify-content: center;
-            align-items: flex-start;
-            padding: 1rem;
-            width: 100%;
-            max-width: 1200px;
-        }
-        .canvas-wrapper {
-            background-color: #ffffff;
-            border-radius: 0.75rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            padding: 1rem;
-            text-align: center;
-            flex: 1 1 45%;
-            min-width: 300px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-        }
-        canvas {
-            border-radius: 0.5rem;
-            max-width: 100%;
-            max-height: 400px;
-            display: block;
-            cursor: grab;
-            object-fit: contain; /* Preserve aspect ratio */
-        }
-        canvas:active {
-            cursor: grabbing;
-        }
-        h1 {
-            color: #334155;
-            margin-bottom: 1.5rem;
-        }
-        h2 {
-            color: #475569;
-            margin-bottom: 0.75rem;
-        }
-        .controls-container {
-            margin-bottom: 1.5rem;
-            background-color: #ffffff;
-            padding: 1rem 2rem;
-            border-radius: 0.75rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.75rem;
-        }
-        input[type="file"], select {
-            padding: 0.5rem 1rem;
-            border: 1px solid #cbd5e1;
-            border-radius: 0.5rem;
-            background-color: #f8fafc;
-            cursor: pointer;
-            font-size: 1rem;
-            color: #475569;
-            transition: all 0.2s ease-in-out;
-            width: 100%;
-            max-width: 250px;
-        }
-        input[type="file"]:hover, select:hover {
-            border-color: #94a3b8;
-            background-color: #e2e8f0;
-        }
-        .loading-message {
-            font-size: 1rem;
-            color: #64748b;
-            font-style: italic;
-        }
-        .hidden { display: none !important; }
+        html,body{height:100%;margin:0;background:var(--bg);color:#e5e7eb;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+        .container{max-width:1100px;margin:0 auto;padding:1rem}
+        @media(min-width:768px){.container{padding:2rem}}
+        header{text-align:center;margin-bottom:2rem}
+        h1{font-size:2rem;margin:0}
+        @media(min-width:1024px){h1{font-size:3rem}}
+        p{color:var(--muted);margin-top:.5rem}
+
+        .grid{display:grid;grid-template-columns:1fr;gap:2rem}
+        @media(min-width:1024px){.grid{grid-template-columns:320px 1fr}}
+
+        .panel{background:var(--panel);padding:1.5rem;border-radius:0.5rem;box-shadow:var(--card-shadow);display:flex;flex-direction:column;gap:1.25rem}
+        .panel h2,.panel h3{margin:0;color:#fff}
+
+        .file-input-label{display:inline-block;width:100%;background:var(--accent);color:white;font-weight:700;padding:.75rem;border-radius:.5rem;text-align:center;cursor:pointer;box-shadow:0 6px 12px rgba(99,102,241,0.12);transition:transform .14s ease,background .14s ease}
+        .file-input-label:hover{transform:translateY(-3px);background:var(--accent-hover)}
+        input[type=file]{display:none}
+        #file-name{font-size:.9rem;color:var(--muted);text-align:center;margin-top:.5rem}
+
+        .range-row{display:flex;flex-direction:column;gap:.25rem}
+        input[type=range]{width:100%}
+        label.block{font-weight:600;color:#e5e7eb}
+
+        .checkbox-row{display:flex;align-items:center;gap:.5rem}
+
+        .download-btn{width:100%;background:var(--green);color:white;font-weight:700;padding:.75rem;border-radius:.5rem;cursor:pointer;border:none;display:inline-flex;align-items:center;justify-content:center}
+        .download-btn:disabled{background:#4b5563;cursor:not-allowed;opacity:.9}
+        .download-btn:hover:enabled{background:var(--green-hover)}
+
+        .preview{background:var(--panel);padding:.5rem;border-radius:.5rem;min-height:400px;position:relative}
+        @media(min-width:768px){.preview{min-height:600px}}
+        #preview-canvas{width:100%;height:100%;display:block;border-radius:.5rem}
+        #placeholder-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.05rem}
+        #spinner{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(31,41,55,0.75);border-radius:.5rem}
+        #spinner.hidden{display:none}
+
+        /* simple canvas wrapper for the three canvas sections */
+        .canvas-wrapper{background:#111827;padding:1rem;border-radius:.5rem;box-shadow:0 6px 12px rgba(0,0,0,0.4);display:flex;flex-direction:column;gap:.75rem}
+        .canvas-box{background:#0f1724;border-radius:.5rem;padding:.5rem;display:flex;align-items:center;justify-content:center;min-height:220px}
+
+        /* screen-reader only text */
+        .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+        /* small utilities used in the existing markup to reduce changes */
+        .text-center{text-align:center}
+        .mb-6{margin-bottom:1.5rem}
+        .mt-4{margin-top:1rem}
+        .text-lg{font-size:1.125rem}
+        .font-medium{font-weight:500}
+        .text-gray-700{color:var(--muted)}
+        .text-xl{font-size:1.25rem}
+        .font-semibold{font-weight:600}
+        .w-full{width:100%}
+        .hidden{display:none !important}
+        .border{border:1px solid rgba(255,255,255,0.06)}
+        .p-4{padding:1rem}
+        .min-h-\[300px\]{min-height:300px}
+        .items-center{align-items:center}
+        .justify-center{justify-content:center}
+    /* Tabs */
+    .tab-link{color:var(--muted);padding:.5rem .75rem;border-radius:.375rem;text-decoration:none;background:transparent}
+    .tab-link.active{background:rgba(255,255,255,0.04);color:#fff;box-shadow:0 6px 12px rgba(0,0,0,0.4)}
+    /* Ensure tabs remain clickable above other content */
+    .top-tabs{position:sticky;top:0;display:flex;justify-content:center;padding-top:1rem;padding-bottom:.5rem;z-index:10000}
+    .top-tabs .tab-link{position:relative;z-index:10001}
     </style>
 </head>
 <body>
-    <h1 class="text-3xl font-bold text-gray-800 mb-6">STL to Depthmap</h1>
-    
-    <div class="controls-container">
-        <label for="stlFileInput" class="text-lg font-medium text-gray-700">Upload an STL Model:</label>
-        <input type="file" id="stlFileInput" accept=".stl">
-        <div id="loadingMessage" class="loading-message hidden">Loading STL...</div>
-
-    <label for="viewSelector" class="text-lg font-medium text-gray-700 mt-4">Select Depth Map View:</label>
-        <select id="viewSelector">
-            <option value="Front">Front</option>
-            <option value="Back">Back</option>
-            <option value="Left">Left</option>
-            <option value="Right">Right</option>
-            <option value="Top">Top</option>
-            <option value="Bottom">Bottom</option>
-        </select>
-    </div>
-
     <div class="container">
-        <div class="canvas-wrapper">
-            <h2 class="text-xl font-semibold">Interactive View</h2>
-            <canvas id="originalCanvas"></canvas>
-        </div>
-        <div class="canvas-wrapper">
-            <h2 class="text-xl font-semibold">Extracted Grayscale Depth Map (Orthographic)</h2>
-            <canvas id="depthCanvas"></canvas>
-            <div class="mt-4 flex gap-2 flex-wrap justify-center">
-                <button id="downloadDepthBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">Download Depth Map (PNG)</button>
-                <button id="downloadSvgBtn" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition">Download SVG</button>
-            </div>
-        </div>
-        <div class="canvas-wrapper">
-            <h2 class="text-xl font-semibold">SVG Preview with Transparency & Contours</h2>
-            <div id="svgPreview" class="w-full border border-gray-300 rounded bg-white p-4 min-h-[300px] flex items-center justify-center">
-                <p class="text-gray-500">SVG preview will appear here after loading a model</p>
-            </div>
-        </div>
+        <header class="text-center mb-8">
+            <nav style="display:flex;justify-content:center;gap:1rem;margin-bottom:1rem;">
+                <a href="index.html" class="tab-link active" id="tab-index" onclick="location.href='index.html';return false;">STL → Depthmap</a>
+                <a href="png_to_stl.html" class="tab-link" id="tab-png" onclick="location.href='png_to_stl.html';return false;">Depthmap → STL</a>
+            </nav>
+            <h1 class="font-bold">STL to Depthmap</h1>
+            <p class="mt-2 text-gray-700">Upload an STL and extract a grayscale depth map, download PNG/SVG output, or preview contours.</p>
+        </header>
+
+        <main class="grid">
+            <!-- Controls panel (left) -->
+            <aside class="panel" style="min-height:200px;">
+                <h2 class="text-lg font-medium">Controls</h2>
+
+                <div>
+                    <label for="stlFileInput" class="file-input-label">Upload STL Model
+                        <input type="file" id="stlFileInput" accept=".stl">
+                    </label>
+                    <p id="file-name" style="margin-top:.5rem;color:var(--muted);font-size:.9rem">No file selected.</p>
+                    <div id="loadingMessage" class="hidden" style="margin-top:.5rem;color:var(--muted);font-style:italic">Loading STL...</div>
+                </div>
+
+                <div>
+                    <label for="viewSelector" class="block mt-4">Select Depth Map View:</label>
+                    <select id="viewSelector" class="w-full" style="margin-top:.5rem;">
+                        <option value="Front">Front</option>
+                        <option value="Back">Back</option>
+                        <option value="Left">Left</option>
+                        <option value="Right">Right</option>
+                        <option value="Top">Top</option>
+                        <option value="Bottom">Bottom</option>
+                    </select>
+                </div>
+
+                <div style="margin-top:1rem">
+                    <button id="downloadDepthBtn" class="download-btn" style="margin-bottom:.5rem">Download Depth Map (PNG)</button>
+                    <button id="downloadSvgBtn" class="download-btn">Download SVG</button>
+                </div>
+            </aside>
+
+            <!-- Preview area (right) -->
+            <section>
+                <div class="canvas-wrapper">
+                    <h2 class="text-xl font-semibold">Interactive View</h2>
+                    <div class="canvas-box"><canvas id="originalCanvas"></canvas></div>
+                </div>
+
+                <div class="canvas-wrapper" style="margin-top:1rem">
+                    <h2 class="text-xl font-semibold">Extracted Grayscale Depth Map (Orthographic)</h2>
+                    <div class="canvas-box"><canvas id="depthCanvas"></canvas></div>
+                </div>
+
+                <div class="canvas-wrapper" style="margin-top:1rem">
+                    <h2 class="text-xl font-semibold">SVG Preview with Transparency & Contours</h2>
+                    <div id="svgPreview" class="canvas-box border p-4 min-h-[300px] items-center justify-center">
+                        <p class="text-gray-500">SVG preview will appear here after loading a model</p>
+                    </div>
+                </div>
+            </section>
+        </main>
     </div>
 
     <script>
@@ -338,6 +315,10 @@
                 loadingMessage.classList.add('hidden'); // Hide if no file selected
                 return;
             }
+
+            // Update visible filename (UI)
+            const fileNameDisplay = document.getElementById('file-name');
+            if (fileNameDisplay) fileNameDisplay.textContent = file.name;
 
             // Set the lastSTLFilename to the basename (without extension)
             let name = file.name || 'depthmap_highres';
@@ -1066,6 +1047,32 @@
             init();
             animate();
         }
+    </script>
+    <script>
+        // Highlight active tab based on current page
+        (function(){
+            try{
+                const path = location.pathname.split('/').pop();
+                document.querySelectorAll('.tab-link').forEach(a=>a.classList.remove('active'));
+                if (!path || path === '' || path === 'index.html') document.getElementById('tab-index')?.classList.add('active');
+                else if (path === 'png_to_stl.html') document.getElementById('tab-png')?.classList.add('active');
+            }catch(e){/* ignore */}
+        })();
+
+        // Ensure tab links are clickable even if some overlay is present
+        (function(){
+            try{
+                document.querySelectorAll('.tab-link').forEach(a=>{
+                    a.style.position = 'relative';
+                    a.style.zIndex = '9999';
+                    a.addEventListener('click', function(e){
+                        e.preventDefault();
+                        const href = this.getAttribute('href');
+                        if (href) location.href = href;
+                    });
+                });
+            }catch(e){/* ignore */}
+        })();
     </script>
 </body>
 </html>
