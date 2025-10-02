@@ -307,13 +307,30 @@
             reader.onload = (e) => {
                 const image = new Image();
                 image.onload = () => {
-                    originalImageData = image;
+                    // Downsample if longest side > 1024
+                    const MAX_DIM = 1024;
+                    const w = image.width;
+                    const h = image.height;
+                    const longest = Math.max(w, h);
+                    if (longest > MAX_DIM) {
+                        const scale = MAX_DIM / longest;
+                        const downCanvas = document.createElement('canvas');
+                        downCanvas.width = Math.round(w * scale);
+                        downCanvas.height = Math.round(h * scale);
+                        const ctx = downCanvas.getContext('2d');
+                        ctx.imageSmoothingEnabled = true;
+                        ctx.imageSmoothingQuality = 'high';
+                        ctx.drawImage(image, 0, 0, downCanvas.width, downCanvas.height);
+                        originalImageData = downCanvas; // use canvas as source for later processing
+                    } else {
+                        originalImageData = image;
+                    }
                     generateModel();
                     placeholderText.style.display = 'none';
                     downloadButton.disabled = false;
                 };
                 image.src = e.target.result;
-            };
+             };
             reader.readAsDataURL(file);
         });
 
