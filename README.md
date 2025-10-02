@@ -120,5 +120,42 @@ python stl_to_depthmap.py foam.stl --svg-contours --segment
 
 Open `stl_to_depthmap.html` in your browser. Upload an STL file, select the desired view, and download the PNG depth map.
 
+## Additional Tools
+
+### `stl_to_pocket.py`
+This script generates a "pocket" mesh from an STL file by rasterizing the depth map and constructing a watertight 3D mesh. It is particularly useful for creating negative molds or tools for CNC machining and other fabrication workflows.
+
+#### Features
+- Converts STL files into depth-based pocket meshes.
+- Supports orientation adjustment to align the mesh with specific axes.
+- Automatically closes non-manifold edges and ensures outward-facing normals.
+
+#### Usage
+```bash
+python stl_to_pocket.py <input.stl> <output.stl> [--resolution RES] [--orientation ORIENT]
+```
+- `<input.stl>`: Path to the input STL file.
+- `<output.stl>`: Path to save the generated pocket mesh.
+- `--resolution RES`: Resolution of the depth map (default: 512).
+- `--orientation ORIENT`: Orientation of the mesh (`auto`, `top`, `bottom`, `left`, `right`, `front`, `back`).
+
+### `make_solid.py`
+This script replicates MeshMixer's "Make Solid" functionality by voxelizing a mesh, filling the volume, and extracting a watertight surface using marching cubes. It is ideal for preparing models for 3D printing or other workflows requiring solid geometry.
+
+#### Features
+- Voxelizes the input mesh and fills the volume.
+- Supports surface offsetting to enlarge or shrink the model.
+- Generates watertight meshes suitable for fabrication.
+
+#### Usage
+```bash
+python make_solid.py <input.stl> <output.stl> [--voxel-size SIZE] [--offset DIST] [--padding PAD]
+```
+- `<input.stl>`: Path to the input STL file.
+- `<output.stl>`: Path to save the solid mesh.
+- `--voxel-size SIZE`: Size of the voxels used for sampling (default: 0.5).
+- `--offset DIST`: Surface offset distance (default: 0.0).
+- `--padding PAD`: Extra space around the mesh bounding box (default: 2.0).
+
 ## License
 GPL v2
